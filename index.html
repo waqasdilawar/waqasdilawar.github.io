@@ -24,15 +24,19 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      margin: 0; min-height: 100vh; display: grid; justify-items: center; align-items: start;
       background: var(--bg); color: var(--fg);
       font: 18px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
-      padding: 24px;
+      padding: 12vh 16px 48px;
     }
     main { max-width: 560px; }
     h1 { font-size: 2.25rem; line-height: 1.2; margin: 0 0 .5rem; }
     p { margin: 0 0 1.5rem; color: var(--muted); }
-    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; }
+    ul.links { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; }
+    h2 { font-size: .8rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 2.75rem 0 1rem; }
+    ul.work { padding-left: 1.1rem; margin: 0; }
+    ul.work li { margin: 0 0 .75rem; }
+    ul.work li::marker { color: var(--muted); }
     a { color: var(--accent); text-decoration: none; }
     a { text-underline-offset: 4px; }
     a:hover, a:focus-visible { text-decoration: underline; }
@@ -48,11 +52,21 @@
   <main>
     <h1>Hello, I'm Waqas.</h1>
     <p>Staff Software Engineer in Lahore, Pakistan. I build real-time data platforms with Apache Flink, Kafka, ClickHouse and Apache Iceberg, on Java and Spring Boot.</p>
-    <ul>
+    <ul class="links">
       <li><a href="https://github.com/waqasdilawar">GitHub</a></li>
       <li><a href="https://www.linkedin.com/in/muhammad-waqas-dilawar-a721b8105">LinkedIn</a></li>
       <li><a href="https://stackoverflow.com/users/6332074/muhammad-waqas-dilawar">Stack Overflow</a></li>
     </ul>
+
+    <h2>Selected work</h2>
+    <ul class="work">
+      <li>Designed streaming pipelines on a Kappa architecture: the same Flink code (plain Java) processes live Kafka traffic and replays history from an Apache Iceberg archive, so there is no separate batch path.</li>
+      <li>Set up ClickHouse sharded and replicated across two data centers on Kubernetes with the infrastructure team, and owned the table design and zero-downtime schema migrations.</li>
+      <li>Cut the time from an event to its appearance in reports from hours to seconds across seven product lines.</li>
+      <li>Made Flink delivery self-serve with GitOps: merge a Helm values change, ArgoCD rolls it out, and the job is in production within minutes.</li>
+      <li>Running Kafka, Kafka Connect and Debezium change data capture in production since 2018.</li>
+    </ul>
+
     <footer>© 2026 Muhammad Waqas Dilawar</footer>
   </main>
 </body>
