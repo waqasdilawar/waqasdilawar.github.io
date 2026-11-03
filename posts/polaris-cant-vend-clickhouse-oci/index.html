@@ -61,7 +61,7 @@
     <a class="back" href="../">← All posts</a>
     <h1>When Polaris Can&#x27;t Vend: What Actually Guards ClickHouse Reads on OCI</h1>
     <p class="date"><time datetime="2026-06-25">25 June 2026</time></p>
-    <figure class="video"><video controls preload="metadata" playsinline poster="poster.png"><source src="video.mp4" type="video/mp4"><track kind="captions" src="captions.vtt" srclang="en" label="English"></video><figcaption>Video walkthrough (4:11), recorded live against the lab. Captions are in the player menu.</figcaption></figure>
+    <figure class="video"><video controls preload="metadata" playsinline poster="poster.png"><source src="video.mp4" type="video/mp4"></video><figcaption>Video walkthrough (4:11), recorded live against the lab.</figcaption></figure>
     <article>
 <p>Quick context. An Iceberg table is Parquet files plus metadata in object storage, and Polaris is the catalog that tells an engine where that metadata lives and who may load it. ClickHouse loads the table from Polaris, then reads the manifests and Parquet from storage itself — with a key from its DDL, or with short-lived credentials Polaris vends for that table's files. This post is about what happens when there is nothing to vend.</p>
 <p>By default, ClickHouse's <code>DataLakeCatalog</code> engine asks Polaris to vend short-lived storage credentials for every table it reads. Our Iceberg catalog sits on OCI Object Storage — S3-compatible, but with no STS behind it — so Polaris has nothing to vend. I got there in three errors, fixed the wrong thing first, and came away thinking one grant was load-bearing. It wasn't.</p>
