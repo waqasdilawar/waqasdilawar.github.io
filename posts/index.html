@@ -59,7 +59,7 @@
     <h1>Writing</h1>
     <p class="lede">Notes from building real-time data platforms with Flink, Kafka, ClickHouse and Iceberg.</p>
     <ul class="posts">
-      <li><a class="t" href="one-privilege-clickhouse-iceberg/">One Privilege Makes ClickHouse Read Your Iceberg Lakehouse</a><div class="d"><time datetime="2026-06-25">25 June 2026</time></div><p>Why one Polaris grant, TABLE_READ_DATA, decides whether ClickHouse can read your Iceberg lakehouse, and the credential-vending 400 that bites right after.</p></li>
+      <li><a class="t" href="polaris-cant-vend-clickhouse-oci/">When Polaris Can&#x27;t Vend: What Actually Guards ClickHouse Reads on OCI</a><div class="d"><time datetime="2026-06-25">25 June 2026</time></div><p>On OCI Object Storage, Polaris has nothing to vend, so ClickHouse reads with the S3 key in its DDL — and TABLE_READ_DATA stops guarding your data.</p></li>
     </ul>
     <footer>© 2026 <a href="../">Muhammad Waqas Dilawar</a></footer>
   </div>
