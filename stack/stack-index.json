@@ -1,0 +1,3585 @@
+[
+ {
+  "name": "ClickHouse",
+  "blurb": "Tinybird · ChistaData · Altinity · official — operating, MVs, schema, Keeper, war stories",
+  "sections": [
+   {
+    "name": "Operating the cluster — the runbook canon",
+    "entries": [
+     {
+      "title": "I've operated petabyte-scale ClickHouse clusters for 5 years (Part I)",
+      "url": "https://www.tinybird.co/blog/what-i-learned-operating-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Javi Santana, 2024, post",
+      "tags": [
+       "sharding",
+       "operating",
+       "scaling"
+      ],
+      "body": "The architecture bible. Don't shard prematurely (\"re-sharding was super hard\"). ZK on isolated machines. Capacity rule: 32 cores ≈ 5GB/s. Wait a month after any release. Batch inserts, aim for one part per insert."
+     },
+     {
+      "title": "Lessons learned from 5 years with ClickHouse clusters: Part II",
+      "url": "https://www.tinybird.co/blog/what-i-learned-operating-clickhouse-part-ii",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Javi Santana, 2024, post",
+      "tags": [
+       "ddl",
+       "replication",
+       "observability",
+       "gotcha"
+      ],
+      "body": "The monitoring + DDL runbook. ON CLUSTER stalls when a replica is down. \"Read only tables → you are fucked\" recovery: drop, recreate, let replication refill. The POPULATE-is-broken warning and the uniqExactState-kills-merges warning both originate here."
+     },
+     {
+      "title": "Hunting orphan objects: 45% off our storage bill (and a near data-loss incident)",
+      "url": "https://www.tinybird.co/blog/how-we-deal-with-cloud-orphan-objects",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Irene Martínez, May 2026, post",
+      "tags": [
+       "war-story",
+       "operating"
+      ],
+      "body": "A cleanup job that continued on incomplete snapshots classified live objects as dead → \"file not found\" at query time. Two paths on disk: runtime uses store/\\<uuid>/, backups use data/\\<db>/\\<table>/. Pre-stage the UUID↔table map before you need it."
+     },
+     {
+      "title": "How we handle service disruptions",
+      "url": "https://blog.tinybird.co/2020/01/09/how-we-handle-service-disruptions/",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Jorge Sancha, 2020, post",
+      "tags": [
+       "war-story",
+       "operating"
+      ],
+      "body": "28-min outage from config drift — one environment had a different data path. Two lessons: LB health checks must verify data returned, not just liveness; and staging-passes ≠ prod-safe when config has drifted."
+     },
+     {
+      "title": "Why we maintain a ClickHouse fork at Tinybird",
+      "url": "https://www.tinybird.co/blog/why-we-maintain-a-clickhouse-fork-at-tinybird",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, 2025, post",
+      "tags": [
+       "materialized-views",
+       "backfill",
+       "gotcha",
+       "operating"
+      ],
+      "body": "Doubles as an upgrade-pain field report. \"Pretty much any time you upgrade you have some issues.\" Documents the UNION + MV silent-drop regression in 25.8.1.477. The case for a query-replay validation harness before every upgrade. Zero-copy disabled by default ≥ v22.8."
+     },
+     {
+      "title": "We added the Backup Database engine to ClickHouse",
+      "url": "https://www.tinybird.co/blog/new-clickhouse-backup-engine",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, 2025, post",
+      "tags": [
+       "operating"
+      ],
+      "body": "Backup Database engine ships in 25.2. Attach a backup as a read-only DB in seconds — no full restore. The cheapest way to run production-data upgrade validation without a parallel cluster."
+     },
+     {
+      "title": "Resolving a year-long ClickHouse lock contention",
+      "url": "https://www.tinybird.co/blog/clickhouse-lock-contention",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Villar / Kita, 2023, post",
+      "tags": [
+       "operating"
+      ],
+      "body": "CPU at 20% but QPS capped → contention, not resources. They added ContextLockWaitMicroseconds (PR #55029) to make it visible, then refactored Context. Result: 3× QPS at concurrency 500, 5×+ at 1000. Put this profile event on your dashboards day one."
+     }
+    ]
+   },
+   {
+    "name": "Observability — the Prometheus signal list",
+    "entries": [
+     {
+      "title": "ClickHouse Grafana mix-in (dashboard + alert rules)",
+      "url": "https://github.com/ClickHouse/clickhouse-mixin",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Inc., 2025, official",
+      "tags": [
+       "observability"
+      ],
+      "body": "The source of truth for exact metric names. The dashboard JSON shows CPU as CGroupUserTimeNormalized × 100. Anything not in here, validate before alerting on it."
+     },
+     {
+      "title": "system.asynchronous\\_metrics (replication signals)",
+      "url": "https://clickhouse.com/docs/operations/system-tables/asynchronous_metrics",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "partitioning",
+       "replication",
+       "observability"
+      ],
+      "body": "Source of the highest-priority alerts: ReadonlyReplica > 0 (page now), ReplicasMaxAbsoluteDelay, ReplicasMaxQueueSize, MaxPartCountForPartition (TOO\\_MANY\\_PARTS proximity — default throw at 300)."
+     },
+     {
+      "title": "ClickHouse Keeper — monitoring & 4LW commands",
+      "url": "https://clickhouse.com/docs/guides/sre/keeper/clickhouse-keeper",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "keeper",
+       "observability"
+      ],
+      "body": "Keeper Raft state lives behind the mntr four-letter-word on port 9181 (zk\\_followers, zk\\_synced\\_followers) — not on the Prometheus endpoint. ClickHouseMetrics\\_KeeperAliveConnections reads 0 in some versions (issue #60742); validate before relying."
+     },
+     {
+      "title": "How to optimize a ClickHouse cluster",
+      "url": "https://www.tinybird.co/blog/optimize-clickhouse-cluster",
+      "rt": true,
+      "alert": false,
+      "meta": "Tinybird, 2025, post",
+      "tags": [
+       "observability",
+       "streaming"
+      ],
+      "body": "The slow-query hunt against system.query\\_log (query\\_duration\\_ms > 1000). Recommends background\\_pool\\_size ≈ 20–30% of cores; flags parts\\_to\\_throw\\_insert=600 as a streaming-tuned value vs OSS 300."
+     },
+     {
+      "title": "How we processed 12 trillion rows during Black Friday",
+      "url": "https://www.tinybird.co/blog-posts/how-we-setup-real-time-analytics-service-to-process-12-trillion-rows-during-black-friday",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Javi Santana, 2023, post",
+      "tags": [
+       "observability",
+       "operating"
+      ],
+      "body": "35M rows/sec read average. The operational nugget: system tables eat disk under load. Set TTLs on system.query\\_log, part\\_log, metric\\_log; disable query\\_thread\\_log if unused."
+     }
+    ]
+   },
+   {
+    "name": "Users, roles, quotas & row policies",
+    "entries": [
+     {
+      "title": "Access Rights & Account Management",
+      "url": "https://clickhouse.com/docs/operations/access-rights",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "schema-evolution",
+       "rbac",
+       "gotcha"
+      ],
+      "body": "The bootstrap dance (access\\_management=1, lock down default). The ALTER hierarchy trap: ALTER ROW POLICY/USER/QUOTA are not children of ALTER — grant explicitly. Privileges survive table drops."
+     },
+     {
+      "title": "CREATE QUOTA",
+      "url": "https://clickhouse.com/docs/sql-reference/statements/create/quota",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "rbac"
+      ],
+      "body": "The runaway-dashboard defense: KEYED BY normalized\\_query\\_hash. Quota counters live on the receiving node — on a 9×2 behind an LB, effective limit = N × quota unless you pin sessions. Quotas reset on restart."
+     },
+     {
+      "title": "CREATE USER",
+      "url": "https://clickhouse.com/docs/sql-reference/statements/create/user",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "rbac",
+       "gotcha",
+       "operating"
+      ],
+      "body": "Prefer bcrypt\\_password. Production hosts: HOST IP only (host\\_regexp adds latency). The VALID UNTIL timezone trap — no IANA names, compute the offset (e.g. +03:00)."
+     },
+     {
+      "title": "CREATE ROW POLICY",
+      "url": "https://clickhouse.com/docs/sql-reference/statements/create/row-policy",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "rbac"
+      ],
+      "body": "Defining any policy on a table hides it from all non-mentioned users — pair with a TO ALL EXCEPT allow-policy. Multi-tenant pattern: USING tenant\\_id = getSetting('SQL\\_tenant\\_id'). Only safe for readonly users."
+     },
+     {
+      "title": "HTTP Authenticator (the Keycloak bridge)",
+      "url": "https://clickhouse.com/docs/operations/external-authenticators/http",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "rbac"
+      ],
+      "body": "Basic scheme + GET only — no Bearer. But the auth server's JSON response can return a settings object that becomes session settings → return SQL\\_tenant\\_id from a Keycloak introspection proxy and drive row policies off it."
+     },
+     {
+      "title": "External Authenticators (LDAP / Kerberos / SSL / HTTP)",
+      "url": "https://clickhouse.com/docs/operations/external-authenticators",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "rbac"
+      ],
+      "body": "The complete self-managed list — no OIDC/JWT on OSS server (Cloud only). For Keycloak: LDAP federation (no claims), HTTP-proxy introspection (claims via settings), a fronting proxy like chproxy, or SSL certs from Keycloak's CA."
+     }
+    ]
+   },
+   {
+    "name": "Materialized views — insert triggers, not snapshots",
+    "entries": [
+     {
+      "title": "CREATE VIEW — all view types",
+      "url": "https://clickhouse.com/docs/sql-reference/statements/create/view",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "materialized-views",
+       "rbac"
+      ],
+      "body": "The \"implemented like insert triggers\" definition. Normal / Materialized / Refreshable / Window. Default security is DEFINER (not INVOKER) — MVs bypass the inserting user's row policies."
+     },
+     {
+      "title": "Incremental Materialized View guide",
+      "url": "https://clickhouse.com/docs/materialized-view/incremental-materialized-view",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "materialized-views"
+      ],
+      "body": "The AggregatingMergeTree + -State / -Merge workhorse pattern. Non-negotiable rule: destination ORDER BY must equal the MV GROUP BY, else merges leave duplicate rows."
+     },
+     {
+      "title": "Refreshable Materialized View",
+      "url": "https://clickhouse.com/docs/materialized-view/refreshable-materialized-view",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "materialized-views",
+       "observability",
+       "wap",
+       "joins"
+      ],
+      "body": "Scheduled, atomic-swap, no restrictions on the SELECT (UNION, JOIN, table functions all work) — the answer to the JOIN trap. Status in system.view\\_refreshes. DEPENDS ON chains. Experimental 23.12 → production-ready 24.10."
+     },
+     {
+      "title": "Materialized views — community wisdom (the 190 GB explosion)",
+      "url": "https://clickhouse.com/docs/tips-and-tricks/materialized-views",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "materialized-views"
+      ],
+      "body": "A 20GB table exploded to 190GB via an MV (one row per attribute). The aggregation-ratio query: if uniq(group\\_by)/count() > 70%, don't build the MV. Run it on every proposal."
+     },
+     {
+      "title": "How to fix Kafka → ClickHouse performance bottlenecks",
+      "url": "https://www.tinybird.co/blog/how-to-fix-kafka-to-clickhouse-performance-bottlenecks",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, 2025, post",
+      "tags": [
+       "materialized-views"
+      ],
+      "body": "The customer with three cascading MVs creating a chain reaction on every append. The direct argument for capping MV chain depth at 2 on high-volume ingest paths."
+     },
+     {
+      "title": "Best practices to backfill materialized views",
+      "url": "https://www.tinybird.co/blog/backfilling-materialized-views-diy-vs-tinybird-and-best-practices",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, 2025, post",
+      "tags": [
+       "materialized-views",
+       "backfill",
+       "replication",
+       "gotcha"
+      ],
+      "body": "The silent-partial-failure trap: a backfill that dies mid-way leaves undetectable incomplete data. Recipe: stage per chunk, validate, atomically rename/move. An 8-day backfill cut down via parallel on-demand replicas."
+     },
+     {
+      "title": "Performance impact of materialized views",
+      "url": "https://altinity.com/blog/performance-impact-of-materialized-views-in-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2024, post",
+      "tags": [
+       "materialized-views"
+      ],
+      "body": "The hard numbers: \\~55% throughput loss at 1 MV, \\~90% at 10 (100-row batches). Batch size dominates MV cost — the strongest argument for a Null-engine landing buffer."
+     },
+     {
+      "title": "ClickHouse MVs: How they work and where they break",
+      "url": "https://bigdataboutique.com/blog/clickhouse-materialized-views-guide",
+      "rt": false,
+      "alert": false,
+      "meta": "BigData Boutique, Mar 2026, post",
+      "tags": [
+       "materialized-views",
+       "joins",
+       "gotcha"
+      ],
+      "body": "Block-level mechanics (max\\_insert\\_block\\_size = 1,048,576), the JOIN trap, why TO tables beat implicit .inner. tables. The clearest single explainer corroborating the docs."
+     },
+     {
+      "title": "PostHog ClickHouse data-ingestion handbook",
+      "url": "https://posthog.com/handbook/engineering/clickhouse/data-ingestion",
+      "rt": false,
+      "alert": false,
+      "meta": "PostHog, 2025, handbook",
+      "tags": [
+       "materialized-views",
+       "migration",
+       "sharding",
+       "gotcha"
+      ],
+      "body": "The Kafka-engine → \\_mv → sharded-events pattern. The DETACH limbo trap: a non-PERMANENTLY detach re-attaches on restart. Schema-as-code via their open-source chschema."
+     },
+     {
+      "title": "MVs as alternative primary indexes",
+      "url": "https://www.highlight.io/blog/clickhouse-materialized-views",
+      "rt": false,
+      "alert": false,
+      "meta": "Highlight.io, 2024, post",
+      "tags": [
+       "materialized-views",
+       "schema-evolution"
+      ],
+      "body": "One table = one primary index. An MV maintains a second sort order for the opposite access pattern: main table by time, MV by trace\\_id for point lookups. Directly relevant to the lookup-vs-rollup tension on event tables."
+     },
+     {
+      "title": "Using Materialized Views in ClickHouse",
+      "url": "https://clickhouse.com/blog/using-materialized-views-in-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Blog, post",
+      "tags": [
+       "materialized-views",
+       "ddl",
+       "operating"
+      ],
+      "body": "The official conceptual intro — engines, combinators, the read-side -Merge story. Good for onboarding teammates before they touch the production MV DDL."
+     }
+    ]
+   },
+   {
+    "name": "ReplacingMergeTree — dedup at merge, not insert",
+    "entries": [
+     {
+      "title": "ReplacingMergeTree engine reference",
+      "url": "https://clickhouse.com/docs/engines/table-engines/mergetree-family/replacingmergetree",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "replacingmergetree"
+      ],
+      "body": "\"Eventual correctness only — don't rely on it.\" Highest version wins; is\\_deleted only filters under FINAL. OPTIMIZE FINAL CLEANUP needs the experimental flag. Deletes recommended only for \\<10% delete rate."
+     },
+     {
+      "title": "Working with ReplacingMergeTree (operator guide)",
+      "url": "https://clickhouse.com/docs/guides/replacing-merge-tree",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "partitioning",
+       "replacingmergetree",
+       "gotcha",
+       "operating"
+      ],
+      "body": "do\\_not\\_merge\\_across\\_partitions\\_select\\_final=1 parallelizes FINAL per partition. The merge-stops-trap: parts past max\\_bytes\\_to\\_merge\\_at\\_max\\_space\\_in\\_pool never auto-merge again — schedule OPTIMIZE on cold partitions."
+     },
+     {
+      "title": "ReplacingMergeTree — The Good, The Bad, The Ugly",
+      "url": "https://altinity.com/blog/clickhouse-replacingmergetree-explained-the-good-the-bad-and-the-ugly",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2023, post",
+      "tags": [
+       "replacingmergetree",
+       "replication"
+      ],
+      "body": "The honest tradeoff write-up. Why clean\\_deleted\\_rows='Always' had correctness issues on replicated tables (issue #50346) — prefer scheduled OPTIMIZE FINAL CLEANUP until verified for your version."
+     },
+     {
+      "title": "SYSTEM RESTORE REPLICA after metadata loss",
+      "url": "https://altinity.com/blog/a-new-way-to-restore-clickhouse-after-zookeeper-metadata-is-lost",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2021, post",
+      "tags": [
+       "replacingmergetree",
+       "schema-evolution",
+       "ddl",
+       "replication"
+      ],
+      "body": "Bulk corrections via insert-higher-version (not ALTER UPDATE). When metadata is lost a replica attaches read-only; SYSTEM RESTORE REPLICA … ON CLUSTER rebuilds it without deleting data."
+     }
+    ]
+   },
+   {
+    "name": "Partition swap — metadata-speed backfills",
+    "entries": [
+     {
+      "title": "Manipulating Partitions and Parts",
+      "url": "https://clickhouse.com/docs/sql-reference/statements/alter/partition",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "partitioning",
+       "backfill",
+       "wap"
+      ],
+      "body": "REPLACE PARTITION is atomic; plain ATTACH PARTITION FROM is hardlink-based but not labelled atomic. Same-disk + same storage-policy required or it falls back to a real copy."
+     },
+     {
+      "title": "How we built branches: sharing production data without copying it",
+      "url": "https://www.tinybird.co/blog/branches-deep-dive",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, Feb 2026, post",
+      "tags": [
+       "partitioning",
+       "backfill",
+       "wap",
+       "operating"
+      ],
+      "body": "Zero-copy partition sharing via cloneAndLoadDataPart() — hardlinks on the same disk, reference counts on S3. Parts are immutable, which is the whole reason ATTACH is cheap and safe."
+     },
+     {
+      "title": "ClickHouse schema migrations 2026 (EXCHANGE TABLES)",
+      "url": "https://www.tinybird.co/blog/clickhouse-schema-migrations",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, Oct 2025, post",
+      "tags": [
+       "partitioning",
+       "backfill",
+       "migration",
+       "wap"
+      ],
+      "body": "EXCHANGE TABLES a AND b swaps names atomically — queries never see an intermediate state. The safe whole-table swap for schema changes that ATTACH PARTITION can't handle (changed ORDER BY / partition key / column types)."
+     }
+    ]
+   },
+   {
+    "name": "Schema migration — Atlas, Flyway, golang-migrate",
+    "entries": [
+     {
+      "title": "Altinity KB — schema migration tools index",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/schema-migration-tools/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, kb",
+      "tags": [
+       "migration"
+      ],
+      "body": "The curated link-list: golang-migrate (their pick), Flyway (community), Bytebase, dbmate, Alembic, plus Python/PHP tools. By giving golang-migrate the only detail page, it's the de-facto recommendation."
+     },
+     {
+      "title": "golang-migrate for ClickHouse",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/schema-migration-tools/golang-migrate/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, kb",
+      "tags": [
+       "migration",
+       "replication"
+      ],
+      "body": "Single binary, no JRE. State in schema\\_migrations. Cluster replication via x-cluster-name. Clustered support since v4.15.0."
+     },
+     {
+      "title": "golang-migrate ClickHouse driver (README)",
+      "url": "https://github.com/golang-migrate/migrate/tree/master/database/clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "golang-migrate, readme",
+      "tags": [
+       "migration",
+       "gotcha"
+      ],
+      "body": "Default TinyLog engine for the state table breaks clickhouse-backup — set x-migrations-table-engine=MergeTree. No multi-statement per file unless x-multi-statement (naive; split, non-transactional). The dirty=1 lock needs manual recovery."
+     },
+     {
+      "title": "ClickHouse KB — schema migration tools",
+      "url": "https://clickhouse.com/docs/knowledgebase/schema_migration_tools",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse Docs, official",
+      "tags": [
+       "migration"
+      ],
+      "body": "The official categorization: write-SQL-run-in-CI (Goose, golang-migrate) vs governance platforms (Bytebase, Liquibase) vs declarative (Atlas). Confirms Atlas cluster support landed v0.37 (Sep 2025)."
+     },
+     {
+      "title": "Flyway ClickHouse driver reference",
+      "url": "https://documentation.red-gate.com/flyway/reference/database-driver-reference/clickhouse-database",
+      "rt": false,
+      "alert": false,
+      "meta": "Redgate / Flyway, 2025, docs",
+      "tags": [
+       "migration",
+       "keeper"
+      ],
+      "body": "Community-tier, separate flyway-database-clickhouse JAR (10.24.0, Aug 2025). First-class Cluster Name + Zookeeper Path config. Stalled-PRs history is the yellow flag — only if you already run Flyway elsewhere."
+     }
+    ]
+   },
+   {
+    "name": "Split-brain & schema-update stalls",
+    "entries": [
+     {
+      "title": "Replication problems & DDL queue (runbook)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-check-replication-ddl-queue/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, Dec 2025, kb",
+      "tags": [
+       "ddl",
+       "replication",
+       "observability",
+       "operating"
+      ],
+      "body": "Read-only tables → DROP / RESTORE REPLICA (recreates ZK metadata, deletes no data). Check system.replicas cluster-wide first. Watch num\\_tries > 100 in the replication queue."
+     },
+     {
+      "title": "DDL completes but stays stuck in distributed\\_ddl\\_queue",
+      "url": "https://github.com/ClickHouse/ClickHouse/issues/72609",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub #72609, 24.8.5, issue",
+      "tags": [
+       "ddl"
+      ],
+      "body": "A TRUNCATE … ON CLUSTER succeeded everywhere but stayed 'Active' in the queue past distributed\\_ddl\\_task\\_timeout (180s). The \"they will execute in background\" message — the DDL didn't fail, it timed out."
+     },
+     {
+      "title": "Stuck DDL worker on replica down",
+      "url": "https://github.com/ClickHouse/ClickHouse/issues/27178",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub #27178, 21.7, issue",
+      "tags": [
+       "ddl",
+       "replication"
+      ],
+      "body": "One stuck task blocks all subsequent DDL because the worker is single-threaded on the queue. The cascade you most want to avoid — alert on queue age."
+     },
+     {
+      "title": "DDLWorker fails ON CLUSTER — regression in v25.8.10.7-lts",
+      "url": "https://github.com/ClickHouse/ClickHouse/issues/89693",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub #89693, Nov 2025, issue",
+      "tags": [
+       "backfill",
+       "ddl",
+       "gotcha",
+       "operating"
+      ],
+      "body": "All ON CLUSTER DDLs fail on first install: \"There is no a local address in host list.\" Carried forward across LTS tags. Proof the LTS label doesn't catch every regression — replay-harness before upgrade."
+     },
+     {
+      "title": "Keeper causing replicas to turn read-only",
+      "url": "https://github.com/ClickHouse/ClickHouse/issues/69056",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub #69056, Aug 2024, issue",
+      "tags": [
+       "migration",
+       "replication",
+       "keeper"
+      ],
+      "body": "A team built an identical cluster on Keeper (vs ZooKeeper); random replicas went read-only for days, merges restarted from scratch. They migrated back to ZooKeeper to fix it. Worth knowing the failure shape exists."
+     },
+     {
+      "title": "No maintenance mode when Keeper quorum is lost",
+      "url": "https://github.com/ClickHouse/ClickHouse/issues/35465",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub #35465, 2022, issue",
+      "tags": [
+       "replication",
+       "keeper"
+      ],
+      "body": "Open feature request: there's no way to access data or reconfigure when quorum is gone — recovery mode or nothing. Sets expectations for your worst-case Keeper DR rehearsal."
+     },
+     {
+      "title": "How to handle a ClickHouse Keeper quorum loss",
+      "url": "https://oneuptime.com/blog/post/2026-03-31-clickhouse-handle-keeper-quorum-loss/view",
+      "rt": false,
+      "alert": false,
+      "meta": "OneUptime, Mar 2026, post",
+      "tags": [
+       "replication",
+       "keeper",
+       "operating"
+      ],
+      "body": "The 4LW triage sequence: echo ruok \\| nc host 9181, echo isro for read-only state, look for Mode: leader. A practical recovery walkthrough to adapt into your runbook."
+     }
+    ]
+   },
+   {
+    "name": "Customer war stories — MVs & scale at the edge",
+    "entries": [
+     {
+      "title": "HTTP analytics for 6M requests/sec using ClickHouse",
+      "url": "https://blog.cloudflare.com/http-analytics-for-6m-requests-per-second-using-clickhouse/",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudflare, 2018, post",
+      "tags": [
+       "materialized-views",
+       "replication",
+       "war-story",
+       "gotcha"
+      ],
+      "body": "The canonical reference: 8 ReplicatedAggregatingMergeTree MVs off one raw table, each a different breakdown, queried in parallel for dashboards. 36-node cluster, 3× replication."
+     },
+     {
+      "title": "How we make sense of too much data (downsampling)",
+      "url": "https://blog.cloudflare.com/how-we-make-sense-of-too-much-data/",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudflare, 2025, post",
+      "tags": [
+       "materialized-views",
+       "war-story",
+       "scaling"
+      ],
+      "body": "700M+ events/sec, scan 96 trillion events in an hour, sub-2s. The 2018 MV architecture held — they evolved by adding downsampling, not rearchitecting MVs away."
+     },
+     {
+      "title": "PostHog ClickHouse operations handbook",
+      "url": "https://posthog.com/handbook/engineering/clickhouse/operations",
+      "rt": false,
+      "alert": false,
+      "meta": "PostHog, 2025, handbook",
+      "tags": [
+       "materialized-views",
+       "replacingmergetree",
+       "replication",
+       "war-story"
+      ],
+      "body": "33 MVs + 38 ReplicatedReplacingMergeTree tables managed as code. Orphan ZK records pre-22.3, the kafka\\_ingestion\\_warnings pattern for broken messages. Honest operational detail from a heavy user."
+     },
+     {
+      "title": "Lovable: refreshable MVs for periodic checks",
+      "url": "https://clickhouse.com/blog/lovable-ai-powered-observability",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse / Lovable, Mar 2026, case",
+      "tags": [
+       "materialized-views",
+       "war-story",
+       "scaling"
+      ],
+      "body": "The clean split: incremental MVs for dashboards, refreshable MVs re-checked hourly for alerting. Four tables + four MVs powering the whole thing."
+     },
+     {
+      "title": "Superwall: MVs were \"like magic\"",
+      "url": "https://clickhouse.com/blog/superwall-warpstream-clickhouse-cloud-monetization",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse / Superwall, case",
+      "tags": [
+       "materialized-views",
+       "war-story",
+       "scaling"
+      ],
+      "body": "100 MB/sec ingest, 300 TB, +40 TB/month. Leaned on MVs instead of custom counter-update jobs. Cites Cloudflare + PostHog blogs as the confidence proof — the same lineage you're reading."
+     },
+     {
+      "title": "Laravel Nightwatch: 1M events/sec observability",
+      "url": "https://aws.amazon.com/blogs/big-data/how-laravel-nightwatch-handles-billions-of-observability-events-in-real-time-with-amazon-msk-and-clickhouse-cloud/",
+      "rt": true,
+      "alert": false,
+      "meta": "AWS Big Data, Oct 2025, post",
+      "tags": [
+       "partitioning",
+       "materialized-views",
+       "observability",
+       "war-story"
+      ],
+      "body": "MSK → ClickHouse at 1M events/sec sustained. MVs pre-aggregate raw JSON into query-ready form; time-series partitioning + codecs keep queries sub-second. A close analogue to a Flink → ClickHouse ingest shape."
+     },
+     {
+      "title": "Cloudflare: scaling to quadrillions of rows",
+      "url": "https://clickhouse.com/blog/cloudflare",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, 2026, case",
+      "tags": [
+       "materialized-views",
+       "war-story",
+       "scaling"
+      ],
+      "body": "The long-view companion — how the architecture compounded over years. Useful evidence for the \"this scales\" argument."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Resharding & rebalancing",
+    "entries": [
+     {
+      "title": "Operator issue #750 — Data rebalancing not supported",
+      "url": "https://github.com/Altinity/clickhouse-operator/issues/750",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity operator, issue",
+      "tags": [
+       "sharding",
+       "operating",
+       "scaling"
+      ],
+      "body": "ClickHouse can't rebalance data; reducing shard count in YAML loses it. If you'll scale 9×2→12×2 later, build the rebalancing pipeline now — there is no 'just change the count' path."
+     },
+     {
+      "title": "KB — Distributed table to a new cluster (MV-based shift)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-data-migration/distributed-table-cluster/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "backfill",
+       "sharding"
+      ],
+      "body": "No-downtime resharding: stand up the new-shape cluster, mirror inserts via a Distributed MV, cut over, then backfill history separately. Cleaner than clickhouse-copier for incremental moves."
+     },
+     {
+      "title": "The Curse of Regional Traffic",
+      "url": "https://altinity.com/blog/the-curse-of-regional-traffic-in-write-intensive-clickhouse-applications",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Zaitsev, 2026, blog",
+      "tags": [
+       "backfill",
+       "sharding"
+      ],
+      "body": "Cross-AD rebalancing/backfill is billed on both ingress and egress at most clouds; co-locate or throttle the backfill, and prefer Native/Parquet over JSON-over-HTTP."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Sharding & replication",
+    "entries": [
+     {
+      "title": "ClickHouse Data Distribution",
+      "url": "https://altinity.com/blog/2017-6-5-clickhouse-data-distribution",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Zaitsev, 2017, canonical",
+      "tags": [
+       "replacingmergetree",
+       "sharding",
+       "replication"
+      ],
+      "body": "Sharding and replication are orthogonal and baked in at CREATE TABLE — define tables Replicated from day one (you also get ZK-tracked dedup of the last 100 insert blocks)."
+     },
+     {
+      "title": "KB — Settings to adjust (production discipline list)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-settings-to-adjust/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "partitioning",
+       "sharding",
+       "replication",
+       "operating"
+      ],
+      "body": "Settings most likely to bite a 9×2: insert\\_distributed\\_sync, fsync\\_\\*, insert\\_quorum, do\\_not\\_merge\\_across\\_partitions\\_select\\_final, inactive\\_parts\\_to\\_throw\\_insert."
+     },
+     {
+      "title": "KB — Network configuration for cluster nodes",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/cluster-production-configuration-guide/network-configuration/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "sharding",
+       "replication",
+       "keeper"
+      ],
+      "body": "Firewall ports (9000 native, 9009 interserver, 2181/9181 Keeper), 10 Gbit between nodes, AD separation for replicas, and keep inter-replica round-trip under \\~20 ms."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Keeper",
+    "entries": [
+     {
+      "title": "KB — Using clickhouse-keeper (migration mechanics)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-zookeeper/clickhouse-keeper/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "migration",
+       "replication",
+       "keeper"
+      ],
+      "body": "A mixed ZK/Keeper quorum is unsupported and snapshot formats differ; convert from a stopped ZK leader, or start empty and rebuild metadata via SYSTEM RESTORE REPLICA per table."
+     },
+     {
+      "title": "KB — ZooKeeper backup (TL;DR: don't)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-zookeeper/altinity-kb-zookeeper-backup/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "replication",
+       "keeper",
+       "operating"
+      ],
+      "body": "Don't back up ZK/Keeper — a snapshot is incoherent with on-disk data. Back up ClickHouse data and rebuild Keeper's view with SYSTEM RESTORE REPLICA. Inverts the usual operator instinct."
+     },
+     {
+      "title": "KB — ZooKeeper care & feeding",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-zookeeper/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "keeper"
+      ],
+      "body": "Hard rules: NVMe for the txn log, 3 nodes (not 5), never co-locate with ClickHouse, set autopurge. 'Slow ZooKeeper' is usually a ClickHouse-side symptom (too many parts/tables)."
+     },
+     {
+      "title": "What's new in the Altinity Kubernetes Operator",
+      "url": "https://altinity.com/blog/whats-new-in-the-altinity-kubernetes-operator-for-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, blog",
+      "tags": [
+       "keeper",
+       "operating"
+      ],
+      "body": "Its CHK Keeper-replacement runbook is the cleanest end-to-end one published — including that mount paths must match or the new Keeper won't find its state. Useful even on bare metal."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Users, RBAC & security",
+    "entries": [
+     {
+      "title": "CVEs, ClickHouse, and Altinity.Cloud",
+      "url": "https://altinity.com/blog/cves-clickhouse-and-altinity-cloud-separating-signal-from-noise",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Filimonov, 2026, blog",
+      "tags": [
+       "ddl",
+       "rbac"
+      ],
+      "body": "The access\\_control\\_improvements block (off by default): row-policy default-deny, ON CLUSTER requires grant, table\\_engines\\_require\\_grant, plus remote\\_url\\_allow\\_hosts to close SSRF via url()/s3()."
+     },
+     {
+      "title": "Integrating ClickHouse with LDAP, Part 1",
+      "url": "https://altinity.com/blog/integrating-clickhouse-with-ldap-part-one",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2021, blog",
+      "tags": [
+       "rbac"
+      ],
+      "body": "LDAP for auth of local users, or as an external user directory mapping LDAP groups to ClickHouse roles — the latter eliminates per-user CREATE USER entirely."
+     },
+     {
+      "title": "OAuth in Altinity Builds",
+      "url": "https://altinity.com/webinarspage/making-clickhouse-safe-for-ai-using-oauth-in-altinity-builds",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2026, webinar",
+      "tags": [
+       "rbac"
+      ],
+      "body": "OAuth 2.0 / OIDC support landing in Altinity Stable — token-based, Keycloak / Azure AD / Cognito; relevant once you expose endpoints to BI tools with their own SSO."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Observability",
+    "entries": [
+     {
+      "title": "A ClickHouse 25.8 Detective Story: High Memory Usage",
+      "url": "https://altinity.com/blog/a-clickhouse-25-8-detective-story-high-memory-usage-and-how-to-fix-it",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, 2025, blog",
+      "tags": [
+       "observability",
+       "streaming",
+       "war-story",
+       "operating"
+      ],
+      "body": "system.metric\\_log now has 1,500+ columns; wide-part merges hold every column stream in memory and OOM-kill idle clusters. Fix: raise min\\_bytes\\_for\\_wide\\_part before production traffic."
+     },
+     {
+      "title": "KB — Handy queries for system.query\\_log",
+      "url": "https://kb.altinity.com/altinity-kb-useful-queries/query_log/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "observability",
+       "gotcha"
+      ],
+      "body": "Cluster-wide slow-query analysis SQL grouped by normalized query hash, with a CPU / disk / network / ZK-wait breakdown — the foundation for your Grafana dashboards."
+     },
+     {
+      "title": "KB — When the SYSTEM database gets out of hand",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-system-tables-eat-my-disk/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "observability"
+      ],
+      "body": "\\_log tables grow unbounded; ship a z\\_log\\_disable.xml but keep query\\_log + part\\_log with TTL. Setting TTL matters more than disabling."
+     },
+     {
+      "title": "KB — ClickHouse Monitoring (collated)",
+      "url": "https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-monitoring/",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity KB, reference",
+      "tags": [
+       "observability",
+       "operating"
+      ],
+      "body": "Every maintained exporter plus Altinity's Grafana dashboards and Prometheus alert rules in the operator repo — a vetted starter alert set even off Kubernetes."
+     }
+    ]
+   },
+   {
+    "name": "Altinity · Incidents & internals",
+    "entries": [
+     {
+      "title": "Understanding Detached Parts in ClickHouse",
+      "url": "https://altinity.com/blog/understanding-detached-parts-in-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity, blog",
+      "tags": [
+       "war-story",
+       "operating"
+      ],
+      "body": "What detached parts mean, why they appear, and how to reattach or clean them."
+     }
+    ]
+   },
+   {
+    "name": "Further references (from chats)",
+    "entries": [
+     {
+      "title": "ClickHouse MVs and the one-primary-index workaround",
+      "url": "https://launchdarkly.com/docs/tutorials/clickhouse-materialized-views",
+      "rt": false,
+      "alert": false,
+      "meta": "LaunchDarkly, tutorial",
+      "tags": [
+       "indexing",
+       "materialized-views"
+      ],
+      "body": "ClickHouse's one-primary-index-per-table constraint, and serving a second sort order with a re-sorted MV or projection."
+     },
+     {
+      "title": "ClickHouse Mutations — what UPDATE/DELETE really cost",
+      "url": "https://oneuptime.com/blog/post/2026-01-21-clickhouse-mutations/view",
+      "rt": false,
+      "alert": false,
+      "meta": "OneUptime, 2026, guide",
+      "tags": [
+       "partitioning",
+       "schema-evolution"
+      ],
+      "body": "Mutations rewrite parts in the background, and UPDATE is rejected on ORDER BY / partition columns — the cost model to understand before you ALTER."
+     },
+     {
+      "title": "Lakehouses: a path to low-cost, no-lock-in observability",
+      "url": "https://clickhouse.com/blog/lakehouses-path-to-low-cost-scalable-no-lockin-observability",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, 2026, architecture",
+      "tags": [
+       "indexing",
+       "observability",
+       "table-formats",
+       "scaling"
+      ],
+      "body": "Iceberg/Delta for observability at scale — with the explicit note that Iceberg has no sparse-primary or inverted index like ClickHouse uses for granular pruning."
+     },
+     {
+      "title": "KFC: Kafka, Flink & ClickHouse blueprint (Mux)",
+      "url": "https://bigdataboutique.com/blog/kfc-architecture-blueprint-kafka-flink-and-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "BigData Boutique, architecture",
+      "tags": [
+       "materialized-views"
+      ],
+      "body": "How Mux replaced an entire Flink layer with cascading MVs + Null tables at \\~500K writes/sec with sub-minute lag — and when that's the right call."
+     },
+     {
+      "title": "Real-time aggregations with ClickHouse MVs (80% cost cut)",
+      "url": "https://engineering.wingify.com/posts/achieving-real-time-aggregations-with-ch-materialized-views/",
+      "rt": true,
+      "alert": false,
+      "meta": "Wingify, 2025, case study",
+      "tags": [
+       "materialized-views",
+       "migration",
+       "war-story",
+       "operating"
+      ],
+      "body": "Migrating real-time event aggregation off Postgres to ClickHouse MVs for an 80% operational-cost cut — the pattern and the numbers."
+     },
+     {
+      "title": "MV rebuild infrastructure (GitLab issue)",
+      "url": "https://gitlab.com/gitlab-org/gitlab/-/issues/431453",
+      "rt": false,
+      "alert": false,
+      "meta": "GitLab, issue",
+      "tags": [
+       "materialized-views",
+       "backfill",
+       "wap"
+      ],
+      "body": "GitLab's fix for MVs drifting from source: build a tmp\\_ MV, backfill it, then EXCHANGE TABLES to atomic-swap it into place."
+     },
+     {
+      "title": "chschema — schema-as-code (PostHog)",
+      "url": "https://github.com/posthog/chschema",
+      "rt": false,
+      "alert": false,
+      "meta": "PostHog, tool",
+      "tags": [
+       "ddl",
+       "migration"
+      ],
+      "body": "PostHog's schema-as-code tool for managing ClickHouse DDL in version control."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Tinybird, Jun–Nov 2026",
+    "entries": [
+     {
+      "title": "From OLTP to OLAP: 7 ClickHouse® Optimization Mistakes",
+      "url": "https://www.tinybird.co/blog/olap-most-common-mistakes",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Iago Enríquez, Aug 2026, post",
+      "tags": [
+       "materialized-views",
+       "joins",
+       "partitioning",
+       "gotcha"
+      ],
+      "body": "Seven rules from real customer tuning: filter before the join, sort key matches the filters (<code>upper(country)</code> defeats it, so normalize at ingest), LowCardinality for repeated strings, MV joins only fire on the left table, few large partitions. Measured result: endpoint p95 CPU from \\~5s to under 1s, workload moved to one third the capacity. The MV join trigger rule is the one to repeat to the team."
+     },
+     {
+      "title": "Self-hosted vs managed ClickHouse",
+      "url": "https://www.tinybird.co/blog/self-hosted-vs-managed-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird, Aug 2026, post",
+      "tags": [
+       "replication",
+       "keeper",
+       "operating",
+       "scaling"
+      ],
+      "body": "Vendor framed but the self hosted half is a good runbook: 3 node Keeper never on the database boxes; add a replica to <code>remote_servers</code> only once <code>queue_size</code> and <code>absolute_delay</code> are zero; recent defaults delay inserts at 1000 parts per partition and throw at 3000; <code>SYSTEM RESTART REPLICA</code> when the queue drifts from Keeper. Tinybird's first prod upgrade took 3h after 2 weeks of prep. Directly applicable to any self-hosted cluster."
+     },
+     {
+      "title": "Lightweight deletes for Tinybird Data Sources now in Beta",
+      "url": "https://www.tinybird.co/blog/lightweight-deletes",
+      "rt": true,
+      "alert": false,
+      "meta": "Tinybird · Jesús Botella, Jun 2026, post",
+      "tags": [
+       "schema-evolution",
+       "cdc",
+       "operating"
+      ],
+      "body": "Lightweight <code>DELETE</code> writes a hidden <code>_row_exists</code> mask instead of rewriting parts; reads filter it at once, physical removal waits for merges. Can be scoped by partition. Note: ClickHouse does not report affected rows, so counts are computed beforehand. Relevant for GDPR style deletes on CDC fed tables versus <code>ALTER TABLE … DELETE</code> mutations."
+     },
+     {
+      "title": "Cluster Management: keep the controls, skip the cluster ops",
+      "url": "https://www.tinybird.co/blog/clickhouse-cluster-management",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Aitana Azcona, Sep 2026, product post",
+      "tags": [
+       "replication",
+       "scaling",
+       "operating"
+      ],
+      "body": "Product launch, but the resize pattern transfers: add new replicas, wait, shift weighted round robin read / write traffic, verify latency and queues, then remove old replicas; pay for overlap. Concurrency guard via <code>old_weights</code>. A clean template for a no downtime vertical resize on a self-managed cluster."
+     },
+     {
+      "title": "From 48 Seconds to 130 Milliseconds: Vector Search in Tinybird",
+      "url": "https://www.tinybird.co/blog/vector-search-improvements",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Daniel Sangorrín, May 2026, post (missed earlier)",
+      "tags": [
+       "indexing",
+       "partitioning",
+       "gotcha"
+      ],
+      "body": "19.35M × 768d embeddings. Each data part holds its own HNSW graph, so monthly partitions gave 58 graphs and 15–48s queries; one partition + <code>OPTIMIZE FINAL</code> gave one graph. Then the \\~35GB index overflowed the 5GB default <code>vector_similarity_index_cache_size</code>; at 40GB queries fell to \\~26ms, and stayed \\~80–200ms for LIMIT 1,000. Part 2 (continuous ingest) not yet published. Relevant to semantic search in DENG-2357."
+     },
+     {
+      "title": "Finding and fixing bugs in ClickHouse®'s Alias table engine",
+      "url": "https://www.tinybird.co/blog/fixing-clickhouse-alias-dependency-bug",
+      "rt": false,
+      "alert": false,
+      "meta": "Tinybird · Enric Calabuig, Apr 2026, post (missed earlier)",
+      "tags": [
+       "migration",
+       "materialized-views",
+       "ddl",
+       "gotcha"
+      ],
+      "body": "The experimental Alias engine forwards reads and writes to a target table (useful for zero downtime routing during migrations). Two bugs: unqualified targets were resolved against the session database, breaking <code>check_referential_table_dependencies</code> (fixed, PR #95175); inserts through an Alias did not trigger MVs on the target (fixed upstream in PR #94890). Check your version before using Alias as a swap layer."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Altinity, Jun–Nov 2026",
+    "entries": [
+     {
+      "title": "Important Security Advisory for Altinity Builds of ClickHouse®",
+      "url": "https://altinity.com/news/important-security-advisory-for-altinity-builds-of-clickhouse",
+      "rt": false,
+      "alert": true,
+      "meta": "Altinity · Alexander Zaitsev, 1 Nov 2026, advisory",
+      "tags": [
+       "rbac",
+       "operating",
+       "gotcha"
+      ],
+      "body": "Three issues: a Brotli decoder crash on crafted requests (all versions since 19.3.3), a compromised CA in base Debian images, and CVE-2026-116366, an unauthenticated remote code execution for anyone with network access (details embargoed until 13 Nov; fix still in progress at posting). Patched upstream images exist on DockerHub but were not yet formally released: 26.3.62.3, 26.8.36.3, 26.9.27.3, 26.10.3.7. If you run Altinity builds, check your version and who can reach ports 8123 / 9000."
+     },
+     {
+      "title": "Common Mistakes when Designing Schema for Log Data in ClickHouse®",
+      "url": "https://altinity.com/blog/common-mistakes-when-designing-schema-for-log-data-in-clickhouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Dmitry Titov, Oct 2026, deep dive",
+      "tags": [
+       "schema-evolution",
+       "indexing",
+       "partitioning",
+       "gotcha"
+      ],
+      "body": "On ClickHouse's own TextBench OTel logs (1B rows): 39.5 GiB → 16.8 GiB and 16% faster queries. A Map column with \\~2,000 distinct values went 16.1 GiB → 60 MiB as <code>LowCardinality(String)</code>; drop ZSTD on small columns, ZSTD(3) on heavy ones; <code>optimize_row_order</code> only applies to new inserts, so <code>OPTIMIZE FINAL</code> won't do it, re-insert; skip index materialization on insert and force compact level 0 parts. Strong checklist for any event table."
+     },
+     {
+      "title": "Introducing CAS: Drop-in Compute-Storage Separation for ClickHouse® MergeTree Tables",
+      "url": "https://altinity.com/blog/introducing-cas-drop-in-compute-storage-separation-for-clickhouse-mergetree-tables",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Alexander Zaitsev, Sep 2026, architecture",
+      "tags": [
+       "replication",
+       "scaling",
+       "table-formats",
+       "operating"
+      ],
+      "body": "Open source answer to SharedMergeTree in the Antalya 26.6 build: each part file stored once in S3 under its content hash, immutable manifests, coordination state in the bucket, GC by reachability (proved in TLA+). Fixes the orphan object problem that got zero copy deprecated upstream. Experimental; fine for cold tier, inserts not yet performant; S3 and GCS only. A new replica came up in 14s with no data copy."
+     },
+     {
+      "title": "Is It Safe? Letting AI Agents Touch Production Data without the Tears",
+      "url": "https://altinity.com/blog/is-it-safe-letting-ai-agents-touch-production-data-without-the-tears",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Doug Tidwell, Aug 2026, post",
+      "tags": [
+       "rbac",
+       "ai-agents",
+       "mcp",
+       "war-story"
+      ],
+      "body": "Opens with an agent that set <code>max_table_size_to_drop</code> to 0 and then dropped a prod table. Guardrails belong in the database: a read only role, a settings profile (readonly, max threads, execution time), a quota, row policies, OAuth short lived tokens, an MCP server that never hands the LLM a DB credential, and no <code>kubectl</code> / cloud CLIs in the agent's sandbox. A direct checklist before giving any agent database access."
+     },
+     {
+      "title": "Essential Tips for Safely Upgrading to Altinity Stable® 26.3",
+      "url": "https://altinity.com/blog/essential-tips-for-safely-upgrading-to-altinity-stable-26-3",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Alexander Zaitsev, Aug 2026, runbook",
+      "tags": [
+       "migration",
+       "ddl",
+       "operating",
+       "gotcha"
+      ],
+      "body": "Upgrade 25.8 → 26.3 is safe; downgrade is not unless you prepare. Pre-checks for removed features (Object type, hypothesis indexes, LIVE VIEW, QPL/QAT codecs) and pending mutations / DDL queue. Set <code><compatibility>25.8</compatibility></code> in the default profile before the first start to keep new parts readable by 25.8. Note <code>async_insert</code> now defaults to 1. Rebuild text indexes afterwards. Go one LTS at a time."
+     },
+     {
+      "title": "ClickHouse® Keeper: The Long Road from \"ZooKeeper in C++\" to Something More",
+      "url": "https://altinity.com/blog/clickhouse-keeper-the-long-road-from-zookeeper-in-c-to-something-more",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Mikhail Filimonov, Aug 2026, deep dive",
+      "tags": [
+       "keeper",
+       "replication",
+       "war-story"
+      ],
+      "body": "Why Keeper used to lose to ZooKeeper (one session's read flushed every session's write batch; underfilled pipeline; NuRaft followers blocked on fsync, so writes cost 3–4 fsyncs instead of 1–2) and how 26.6 (PR #101757) made it \\~2× faster: matches ZooKeeper on latency, beats it on throughput. Also the ZooKeeper <code>zxid</code> rollover failure mode. If an old benchmark kept you on ZooKeeper, rerun it on 26.6."
+     },
+     {
+      "title": "Cheap, Cheap, Cheap! 6 Best Practices to Save Big Money on Your ClickHouse® Bill",
+      "url": "https://altinity.com/webinarspage/cheap-cheap-cheap-6-best-practices-to-save-big-money-on-your-clickhouse-bill",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Robert Hodges, Aug 2026, webinar (not watched)",
+      "tags": [
+       "operating",
+       "scaling"
+      ],
+      "body": "Six cost levers: open source builds, schema tuning, TTLs, tiered storage, compute sizing and more. Watch with the log schema post above."
+     },
+     {
+      "title": "Managing Users and Access with OAuth and Antalya",
+      "url": "https://altinity.com/blog/managing-users-and-access-with-oauth-and-antalya",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Doug Tidwell, Sep 2026, post (not read in full)",
+      "tags": [
+       "rbac"
+      ],
+      "body": "Open source OAuth token auth in the Antalya build, with identity provider groups mapped to ClickHouse roles. Follows the 2026 OAuth webinar already indexed above; relevant to the Keycloak bridge question."
+     },
+     {
+      "title": "Building an ETL Platform While Migrating to Project Antalya",
+      "url": "https://altinity.com/blog/building-an-etl-platform-while-migrating-to-project-antalya",
+      "rt": false,
+      "alert": false,
+      "meta": "Altinity · Ruslan Senchukov & Levon Ghukasyan, Sep 2026, case study (not read in full)",
+      "tags": [
+       "table-formats",
+       "catalog",
+       "war-story"
+      ],
+      "body": "MindWise writes ingest as Parquet on S3, registers it as Iceberg tables, and queries with Antalya swarm clusters. A close analogue to an Iceberg bronze layer read through ClickHouse."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · ChistaData, Aug–Oct 2026 (first pass)",
+    "entries": [
+     {
+      "title": "ClickHouse Observability at Scale: 7 Costly Schema Mistakes We Measured",
+      "url": "https://chistadata.com/clickhouse-observability-at-scale/",
+      "rt": false,
+      "alert": false,
+      "meta": "ChistaDATA, Oct 2026, lab write-up",
+      "tags": [
+       "materialized-views",
+       "indexing",
+       "schema-evolution",
+       "gotcha"
+      ],
+      "body": "20M synthetic OTel logs on 26.9.2.8. A service, severity, time sort key read 1 of 2,442 granules for the top dashboard query; promoting map keys and Body fields to <code>MATERIALIZED</code> columns with bloom / set indexes cut reads 25 to 1,265× for +14% storage; 2,400 single row inserts made 2,400 parts, and async inserts cut that 12× but slowed each client 4×; a pod and status MV wrote 1.75M rows per 2.4M input; adding pod name to a rollup took reduction from 113.8× to 1.4×. Also an attribute census query and <code>coalesce</code> normalization for OTel semconv drift (<code>http.status_code</code> vs <code>http.response.status_code</code>). Pairs with the Altinity log schema post."
+     },
+     {
+      "title": "ClickHouse High Availability on 26.9: 8 Brutal Failure Drills, Measured",
+      "url": "https://chistadata.com/clickhouse-high-availability/",
+      "rt": false,
+      "alert": false,
+      "meta": "ChistaDATA, Oct 2026, lab write-up (not read in full)",
+      "tags": [
+       "replication",
+       "keeper",
+       "operating"
+      ],
+      "body": "A three replica cluster with Keeper broken eight ways, with the SQL and runbooks they use. Worth a skim before your own DR rehearsal; check each drill against the Altinity KB runbooks above."
+     },
+     {
+      "title": "ClickHouse Performance Observability: 9 Proven Signals We Trust in 26.9",
+      "url": "https://chistadata.com/clickhouse-performance-observability/",
+      "rt": false,
+      "alert": false,
+      "meta": "ChistaDATA, Oct 2026, post (not read in full)",
+      "tags": [
+       "observability"
+      ],
+      "body": "Nine system tables and endpoints with tested SQL, plus a real Code 241 (memory limit) incident traced to one function. Cross-check against the Prometheus signal list section above."
+     },
+     {
+      "title": "Advanced ClickHouse Troubleshooting on 26.8 LTS: 9 Proven Techniques",
+      "url": "https://chistadata.com/advanced-clickhouse-troubleshooting-26-8-lts-26-9/",
+      "rt": false,
+      "alert": false,
+      "meta": "ChistaDATA, Sep 2026, post (not read in full)",
+      "tags": [
+       "observability",
+       "operating",
+       "war-story"
+      ],
+      "body": "Slow queries, stuck merges and memory errors on 26.8 / 26.9: the system tables behind each, their queries, and a disk full incident from their lab."
+     },
+     {
+      "title": "ClickHouse 26.8 LTS: The Advanced Features That Change Real-Time Analytics Performance",
+      "url": "https://chistadata.com/clickhouse-26-8-lts-real-time-analytics-features/",
+      "rt": false,
+      "alert": false,
+      "meta": "ChistaDATA, Sep 2026, release notes (not read in full)",
+      "tags": [
+       "migration",
+       "streaming"
+      ],
+      "body": "Feature map of 26.8 LTS: cost based optimizer, parallel GROUP BY, Parquet lazy materialization, streaming HTTP API, background queries. Use it to plan the 25.8 → 26.3 → 26.8 path with Altinity's 26.3 runbook; verify details against the official changelog."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · ClickHouse official blog, Jun–Nov 2026",
+    "entries": [
+     {
+      "title": "ClickHouse Release 26.6",
+      "url": "https://clickhouse.com/blog/clickhouse-release-26-06",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, Jun 2026, release",
+      "tags": [
+       "indexing",
+       "materialized-views",
+       "keeper"
+      ],
+      "body": "Hypothetical skip indexes (session only \"what if I had this index?\", so you can test a bloom / set index before paying to build it), cascading refreshable MVs with a reworked dependency model, experimental continuous queries. 26.6 is also the release where Keeper got \\~2× faster (see Altinity above)."
+     },
+     {
+      "title": "ClickHouse Release 26.7",
+      "url": "https://clickhouse.com/blog/clickhouse-release-26-07",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, Jul 2026, release (summary from newsletter)",
+      "tags": [
+       "joins",
+       "indexing",
+       "observability"
+      ],
+      "body": "Hash join with a smaller probe side and build side tables, automatic multi table join reordering, token positions in text indexes (phrase search \\~40× faster on Hacker News data), and <code>EXPLAIN ANALYZE</code>, which annotates the plan with real measurements. <code>EXPLAIN ANALYZE</code> alone is worth the upgrade for query tuning."
+     },
+     {
+      "title": "ClickHouse release 26.8",
+      "url": "https://clickhouse.com/blog/clickhouse-release-26-08",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, Sep 2026, LTS release",
+      "tags": [
+       "migration",
+       "table-formats",
+       "replication"
+      ],
+      "body": "Second LTS of 2026 (shipped 27 Aug, supported to Aug 2027): background queries, pipelined SQL with <code>|></code>, new text tokenizers, broader data lake integrations, faster Parquet / aggregation / joins, and the option for replicas to fetch already mutated parts instead of redoing the mutation. Read the breaking changes before going 25.8 → 26.3 → 26.8; several need <code>compatibility</code> or per setting overrides during rolling upgrades."
+     },
+     {
+      "title": "ClickHouse Release 26.9",
+      "url": "https://clickhouse.com/blog/clickhouse-release-26-09",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse, Sep 2026, release (summary from newsletter)",
+      "tags": [
+       "materialized-views",
+       "rbac"
+      ],
+      "body": "<code>LIMIT … AFTER / UNTIL</code> boundary conditions (all rows after each error, in one query), incremental refresh for append only MVs, <code>CREATE TOKEN</code> for time limited credentials (useful for agent access), and <code>DISTINCT</code> that can spill to disk."
+     },
+     {
+      "title": "The new cost-based join optimizer with reordering support for non-inner joins",
+      "url": "https://clickhouse.com/blog/the-new-cost-based-join-optimizer-with-reordering-support-for-non-inner-joins",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse · Fisnik Kastrati, Oct 2026, deep dive",
+      "tags": [
+       "joins",
+       "statistics"
+      ],
+      "body": "DPsub exhaustive join ordering (up to 10 tables, 12 with <code>query_plan_optimize_join_order_limit</code>) plus a provably correct conflict detector, so LEFT / RIGHT / FULL / SEMI / ANTI joins can be reordered instead of acting as barriers. A semi join pushed below an inner join shrank the largest intermediate \\~496×; TPC-H Q2 −55%, TPC-DS Q73 −45%. Default from 26.10 (<code>query_plan_optimize_join_order_algorithm = 'dpsub,greedy'</code>); compare plans with <code>EXPLAIN actions = 1</code>. Relevant to multi-table enrichment joins in ClickHouse."
+     },
+     {
+      "title": "How we build and evaluate our MCP server for SRE agents (hdx-evals)",
+      "url": "https://clickhouse.com/blog/benchmarking-the-clickstack-mcp-server-with-hdx-evals",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse · Brandon Pereira, Aug 2026, post (summary from newsletter)",
+      "tags": [
+       "ai-agents",
+       "mcp",
+       "observability"
+      ],
+      "body": "An open source eval framework for agent incident investigations: across five reproducible scenarios, a purpose built MCP server beat raw SQL access through the generic ClickHouse MCP by 7–20 points. Tool schemas, response design and actionable errors drive agent accuracy. Direct input for shaping your own MCP tools."
+     },
+     {
+      "title": "The Agentic Analytics Benchmark, round two",
+      "url": "https://clickhouse.com/blog/agentic-analytics-benchmark-round-two",
+      "rt": false,
+      "alert": false,
+      "meta": "ClickHouse · Vellasques, Palacin & Brown, Oct 2026, benchmark (not read)",
+      "tags": [
+       "ai-agents"
+      ],
+      "body": "A public, reproducible benchmark for natural language analytics agents, rerun on GPT-6, Claude Opus 5.5 and Claude Sonnet 5.5; the follow-up adds table ranking and failure labeling (Jev). A useful reference when choosing models for an analytics agent."
+     },
+     {
+      "title": "Your TTL is working. That might be the problem.",
+      "url": "https://medium.com/@amrelboridy7/your-ttl-is-working-that-might-be-the-problem-3ed30cdb1492",
+      "rt": false,
+      "alert": false,
+      "meta": "Community · Amrelboridy, Aug 2026, war story (via newsletter, not read)",
+      "tags": [
+       "partitioning",
+       "operating",
+       "war-story",
+       "gotcha"
+      ],
+      "body": "Disk kept filling with no orphan or detached parts and healthy retention: what actually happens when row TTL expires, and how the partition key decides whether expiry drops parts or rewrites them. Pairs with <code>ttl_only_drop_parts</code> in the ChistaData post above."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "Apache Iceberg",
+  "blurb": "Dipankar Mazumdar + Jack Vanlightly — internals, stats, indexing, catalogs",
+  "sections": [
+   {
+    "name": "Canon: books & research",
+    "entries": [
+     {
+      "title": "Engineering Lakehouses with Open Table Formats",
+      "url": "https://dipankarmazumdar.github.io/books/",
+      "rt": false,
+      "alert": false,
+      "meta": "Packt · w/ Vinoth Govindarajan, 2025, book",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "His magnum opus — internals of Iceberg, Hudi & Delta set side by side, plus a six-dimension decision framework and hands-on exercises across Spark, Flink, Trino & Python. Read this for the cross-format comparison, not a single-format walkthrough."
+     },
+     {
+      "title": "Apache Iceberg: The Definitive Guide",
+      "url": "https://dipankarmazumdar.github.io/books/",
+      "rt": false,
+      "alert": false,
+      "meta": "O'Reilly · w/ Shiran, Hughes, Merced, 2024, book",
+      "tags": [
+       "rbac",
+       "table-formats"
+      ],
+      "body": "The standard Iceberg reference. He co-authored \\~6–7 chapters covering architecture, optimization techniques, and integration with Spark, Flink and Dremio Sonar."
+     },
+     {
+      "title": "The Data Lakehouse: Data Warehousing and More",
+      "url": "https://arxiv.org/abs/2310.08697",
+      "rt": false,
+      "alert": false,
+      "meta": "arXiv, 2023, paper",
+      "tags": [
+       "observability",
+       "table-formats"
+      ],
+      "body": "The paper behind his lakehouse thesis — decomposes the warehouse into storage / file format / table format / compute and argues the lakehouse un-bundles what an OLAP database bundles into one proprietary system."
+     },
+     {
+      "title": "Random Forest Similarity Maps: A Scalable Visual Representation for Interpretation",
+      "url": "https://www.mdpi.com/2079-9292/10/22/2862",
+      "rt": false,
+      "alert": false,
+      "meta": "MDPI Electronics, 2023, paper",
+      "tags": [
+       "table-formats",
+       "scaling"
+      ],
+      "body": "His MSc explainable-AI research (Dalhousie) — scalable visual interpretation of ensemble models. The non-lakehouse root of his \"show how it works under the hood\" instinct."
+     }
+    ]
+   },
+   {
+    "name": "Dremio era: Iceberg internals",
+    "entries": [
+     {
+      "title": "Dealing with Data Incidents Using the Rollback Feature in Apache Iceberg",
+      "url": "https://www.dremio.com/blog/dealing-with-data-incidents-using-the-rollback-feature-in-apache-iceberg/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Feb 2022, hands-on",
+      "tags": [
+       "table-formats",
+       "war-story",
+       "operating"
+      ],
+      "body": "His earliest Dremio post — recovering from a bad write or data-quality incident with snapshot rollback (rollback\\_to\\_snapshot) instead of restoring from backup. Time-travel reframed as an operational safety net."
+     },
+     {
+      "title": "Exploring Branch & Tags in Apache Iceberg using Spark",
+      "url": "https://www.dremio.com/blog/exploring-branch-tags-in-apache-iceberg-using-spark/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Mar 2022, explainer",
+      "tags": [
+       "table-formats",
+       "wap"
+      ],
+      "body": "How Iceberg's named references work in Spark — branches (mutable, for experimentation & WAP) vs tags (immutable, for retention & reproducible reads). The conceptual groundwork the later WAP piece builds on."
+     },
+     {
+      "title": "A Hands-On Look at the Structure of an Apache Iceberg Table",
+      "url": "https://www.dremio.com/blog/a-hands-on-look-at-the-structure-of-an-apache-iceberg-table/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Aug 2022, internals",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "Walks the on-disk anatomy — data files, metadata.json, manifest lists & manifests — by running CTAS / INSERT / UPDATE on NYC taxi data and inspecting exactly what Iceberg writes at each step. The canonical \"what's actually in the table\" piece."
+     },
+     {
+      "title": "How Z-Ordering in Apache Iceberg Helps Improve Performance",
+      "url": "https://www.dremio.com/blog/how-z-ordering-in-apache-iceberg-helps-improve-performance/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Sep 2022, explainer",
+      "tags": [
+       "indexing",
+       "statistics",
+       "compaction",
+       "table-formats"
+      ],
+      "body": "Why hierarchical sort only helps the first column, and how the Z-order space-filling curve clusters multi-dimensional predicates into the same files so min/max pruning skips more. Run it via rewrite\\_data\\_files with the z-order strategy."
+     },
+     {
+      "title": "Puffins and Icebergs: Additional Stats for Apache Iceberg Tables",
+      "url": "https://www.dremio.com/blog/puffins-and-icebergs-additional-stats-for-apache-iceberg-tables/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Oct 2022, explainer",
+      "tags": [
+       "indexing",
+       "statistics",
+       "table-formats",
+       "joins"
+      ],
+      "body": "Introduces the Puffin sketch-stats file (NDV via Theta sketches) and why per-column min/max alone wasn't enough to give the planner cost-based join estimates."
+     },
+     {
+      "title": "A Notebook for Getting Started with Project Nessie, Iceberg & Spark",
+      "url": "https://www.dremio.com/blog/a-notebook-for-getting-started-with-project-nessie-apache-iceberg-and-apache-spark/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, Dec 2022, hands-on",
+      "tags": [
+       "table-formats",
+       "catalog",
+       "wap"
+      ],
+      "body": "The minimal all-open-source lakehouse on a laptop — Spark + Nessie (Git-style data-as-code branching) + Iceberg. The notebook behind several of his beginner talks."
+     },
+     {
+      "title": "What Is a Data Lakehouse?",
+      "url": "https://www.dremio.com/blog/what-is-a-data-lakehouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio · guide, 2022, explainer",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "His evergreen explainer on lakehouse history and the lake + warehouse convergence — the framing every later piece builds on."
+     },
+     {
+      "title": "Streamlining Data Quality with Write-Audit-Publish & Branching",
+      "url": "https://www.dremio.com/blog/streamlining-data-quality-in-apache-iceberg-with-write-audit-publish-branching/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog, 2023, hands-on",
+      "tags": [
+       "streaming",
+       "table-formats",
+       "wap"
+      ],
+      "body": "Two WAP implementations — <a href=\"http://WAP.id\">WAP.id</a> (table property) vs WAP.branch (Iceberg branching, recommended post-1.2.0) — staging an ETL write on an isolated branch, validating, then cherry-picking to main."
+     },
+     {
+      "title": "Introducing the Apache Iceberg Catalog Migration Tool",
+      "url": "https://www.dremio.com/blog/introducing-the-apache-iceberg-catalog-migration-tool/",
+      "rt": false,
+      "alert": false,
+      "meta": "Dremio Blog · w/ Ajantha Bhat, May 2023, hands-on",
+      "tags": [
+       "migration",
+       "table-formats",
+       "catalog"
+      ],
+      "body": "The Nessie-project CLI for moving Iceberg tables between catalogs (Glue, Nessie, Arctic) — three migration scenarios and how to repoint without rewriting data."
+     },
+     {
+      "title": "Getting Started with Flink SQL and Apache Iceberg",
+      "url": "https://www.dremio.com/blog/getting-started-with-flink-sql-and-apache-iceberg/",
+      "rt": true,
+      "alert": false,
+      "meta": "Dremio Blog, Aug 2023, hands-on",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The Flink → Iceberg streaming-sink tutorial with full transactional commit-on-checkpoint."
+     }
+    ]
+   },
+   {
+    "name": "Onehouse era: Hudi, XTable & interoperability",
+    "entries": [
+     {
+      "title": "ACID Transactions in an Open Data Lakehouse",
+      "url": "https://www.onehouse.ai/blog/acid-transactions-in-an-open-data-lakehouse",
+      "rt": false,
+      "alert": false,
+      "meta": "Onehouse Blog, 2024, explainer",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "How open table formats bring atomic commits and consistent reads to object storage — his clearest standalone write-up of lakehouse transactionality."
+     },
+     {
+      "title": "Dremio Lakehouse Analytics with Hudi and Iceberg using XTable",
+      "url": "https://www.onehouse.ai/blog/dremio-lakehouse-analytics-with-hudi-and-iceberg-using-xtable",
+      "rt": false,
+      "alert": false,
+      "meta": "Onehouse Blog · w/ Alex Merced, Apr 2024, hands-on",
+      "tags": [
+       "migration",
+       "table-formats",
+       "joins"
+      ],
+      "body": "The cross-vendor demo: Team A writes Hudi via Spark, Team B reads it in Dremio as Iceberg through XTable metadata translation — joins across formats, no data copy or migration."
+     },
+     {
+      "title": "Apache Hudi vs Delta Lake vs Apache Iceberg — Feature Comparison Deep Dive",
+      "url": "https://www.onehouse.ai/blog/apache-hudi-vs-delta-lake-vs-apache-iceberg-lakehouse-feature-comparison",
+      "rt": false,
+      "alert": false,
+      "meta": "Onehouse Blog, living doc, upd. 2025, comparison",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "The reference comparison he co-maintains. Its thesis: most comparisons wrongly treat these as append-only formats and miss the update-heavy, continuous-table-management features that define a real lakehouse platform."
+     }
+    ]
+   },
+   {
+    "name": "Apache Hudi project blog",
+    "entries": [
+     {
+      "title": "Concurrency Control in an Open Data Lakehouse",
+      "url": "https://hudi.apache.org/blog/2025/01/28/concurrency-control/",
+      "rt": true,
+      "alert": false,
+      "meta": "hudi.apache.org, Jan 2025, internals",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Isolation & serializability from first principles, then OCC vs MVCC vs NBCC — why OCC's table-level lock starves a frequent ingest-vs-delete workload, and why Hudi 1.0's lock-free Non-Blocking Concurrency Control wins for high-throughput streaming."
+     }
+    ]
+   },
+   {
+    "name": "Cloudera era: catalogs, v4 & system internals",
+    "entries": [
+     {
+      "title": "Apache Polaris Internals: The Architecture Behind the REST Catalog",
+      "url": "https://community.cloudera.com/t5/Developer-Blogs/The-Architecture-of-Apache-Polaris-Under-the-Hood/ba-p/414066",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera Community, May 2026, internals",
+      "tags": [
+       "table-formats",
+       "catalog"
+      ],
+      "body": "His full system-design teardown — API surface, realm/runtime, entity model, persistence, the Iceberg execution bridge, and how LIST\\_TABLES / CREATE\\_TABLE / COMMIT\\_TRANSACTION actually execute. Argues Polaris is the control plane, not \"just a REST catalog.\""
+     },
+     {
+      "title": "Apache Iceberg: Key Innovations So Far, and What's Next in v4",
+      "url": "https://community.cloudera.com/t5/Developer-Blogs/Apache-Iceberg-Key-Innovations-So-Far-and-What-s-Next-for/ba-p/413024",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera Community, Nov–Dec 2025, explainer",
+      "tags": [
+       "table-formats",
+       "catalog"
+      ],
+      "body": "The spec-by-spec evolution: v1 analytic tables → v2 MoR & delete files → v3 deletion vectors + VARIANT + row lineage → what v4 is shaping up to be. The cleanest single map of where the format stands today."
+     },
+     {
+      "title": "Developer Relations at Cloudera: Introducing DevRel",
+      "url": "https://www.cloudera.com/blog/business/developer-relations-at-cloudera-introducing-devrel-and-what-developer-advocacy-means-for-cloudera.html",
+      "rt": false,
+      "alert": false,
+      "meta": "cloudera.com · part 1/2, Oct 2025, reflection",
+      "tags": [
+       "rbac",
+       "table-formats",
+       "catalog"
+      ],
+      "body": "Non-technical context: his DevRel playbook (fourth such role after Qlik / Dremio / Onehouse) and his plan to run technical deep-dives, explainers, and runnable labs at Cloudera."
+     }
+    ]
+   },
+   {
+    "name": "Independent: Medium (dipankar-tnt)",
+    "entries": [
+     {
+      "title": "Apache Parquet vs. Newer File Formats (BtrBlocks, FastLanes, Lance, Vortex)",
+      "url": "https://dipankar-tnt.medium.com/apache-parquet-vs-newer-file-formats-btrblocks-fastlanes-lance-vortex-cdf02130182c",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Sep 2025, comparison",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "What AI / GPU / NVMe / SIMD workloads demand that Parquet doesn't give, and where each next-gen format diverges. The most forward-looking thing on the list."
+     },
+     {
+      "title": "What is Apache Arrow Flight, Flight SQL & ADBC?",
+      "url": "https://dipankar-tnt.medium.com/what-is-apache-arrow-flight-flight-sql-adbc-a076511122ac",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Mar 2025, explainer",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Why ODBC/JDBC row-based serialization is the bottleneck for columnar engines, and how Flight + ADBC keep data in Arrow end-to-end with parallel streams."
+     },
+     {
+      "title": "Using Apache Hudi & Iceberg Tables in Databricks with XTable",
+      "url": "https://dipankar-tnt.medium.com/using-apache-hudi-iceberg-tables-in-databricks-with-apache-xtable-253f411be637",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Jun 2024, hands-on",
+      "tags": [
+       "migration",
+       "table-formats",
+       "operating"
+      ],
+      "body": "XTable inside Databricks — interoperate Hudi / Iceberg / Delta and build ML workflows without migrating data between formats."
+     },
+     {
+      "title": "Understanding Compression Codecs in Apache Parquet",
+      "url": "https://dipankar-tnt.medium.com/understanding-compression-codecs-in-apache-parquet-a6279d01b77e",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Jun 2024, explainer",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "zstd vs snappy vs gzip/lzo, and the exact Hudi and Iceberg table properties to set them — the storage-size vs decode-speed tradeoff."
+     },
+     {
+      "title": "Using XTable with a File-System Catalog like S3",
+      "url": "https://dipankar-tnt.medium.com/using-xtable-to-translate-from-iceberg-to-hudi-delta-lake-with-a-file-system-catalog-like-s3-4b72653836f8",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, May 2024, hands-on",
+      "tags": [
+       "table-formats",
+       "catalog"
+      ],
+      "body": "A practical fix born from a real XTable GitHub issue — translating Iceberg tables on a Hadoop/S3 (file-system) catalog into Hudi & Delta, the case the official docs skipped."
+     },
+     {
+      "title": "What is Apache XTable (formerly OneTable)",
+      "url": "https://dipankar-tnt.medium.com/onetable-interoperability-for-apache-hudi-iceberg-delta-lake-bb8b27dd288d",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Mar 2024, explainer",
+      "tags": [
+       "partitioning",
+       "table-formats"
+      ],
+      "body": "The clearest explainer of XTable as a metadata translation layer — not a new format — exploiting that all three table formats sit on Parquet and share schema/partition/stats structures."
+     },
+     {
+      "title": "Apache Hudi (Part 1): History, Getting Started",
+      "url": "https://dipankar-tnt.medium.com/apache-hudi-part-1-history-getting-started-95030b003759",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium · series, Nov 2023, explainer",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "Start of his learn-in-public Hudi series — Uber origins (2017 incremental processing on Hadoop), the snapshot → incremental model, faster upserts, CoW vs MoR."
+     },
+     {
+      "title": "New Job: Apache Hudi, Iceberg — What Lies Ahead?",
+      "url": "https://dipankar-tnt.medium.com/new-job-apache-hudi-iceberg-what-lies-ahead-b7e1d1022dd6",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Nov 2023, reflection",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "The Dremio → Onehouse transition post — what he shipped on Iceberg and why he's pivoting to Hudi & XTable."
+     },
+     {
+      "title": "Embracing Diversity in Open Source: The Apache Iceberg Community",
+      "url": "https://dipankar-tnt.medium.com/embracing-diversity-in-open-source-apache-iceberg-community-a7ea4a92bdce",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Jun 2023, reflection",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "A community/governance reflection — the channels and contributor diversity that shaped the project."
+     },
+     {
+      "title": "Apache Iceberg — Top 5 Features (Features 101)",
+      "url": "https://dipankar-tnt.medium.com/apache-iceberg-features-101-331a254a7ada",
+      "rt": false,
+      "alert": false,
+      "meta": "Medium, Jun 2022, explainer",
+      "tags": [
+       "partitioning",
+       "schema-evolution",
+       "table-formats",
+       "catalog"
+      ],
+      "body": "His earliest widely-shared Iceberg primer — SQL MERGE, hidden partitioning, partition & schema evolution, time travel. The on-ramp the rest of his catalog assumes you've read."
+     }
+    ]
+   },
+   {
+    "name": "Talks & sessions",
+    "entries": [
+     {
+      "title": "Making Lakehouse Table Formats & Catalogs Work for You",
+      "url": "https://www.youtube.com/watch?v=wLsMrdfBuwU",
+      "rt": false,
+      "alert": false,
+      "meta": "Data Engineering Open Forum, 2025, talk",
+      "tags": [
+       "table-formats",
+       "catalog"
+      ],
+      "body": "XTable's architecture and omnidirectional metadata translation — continuous translation across formats via shared metadata, no duplication or rewrites."
+     },
+     {
+      "title": "Apache XTable (incubating): Interoperability Among Lakehouse Table Formats",
+      "url": "https://www.dremio.com/subsurface/on-demand/apache-xtable-incubating-interoperability-among-lakehouse-table-formats/",
+      "rt": false,
+      "alert": false,
+      "meta": "Subsurface, on-demand, talk",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "The Hudi ↔ Iceberg ↔ Delta interoperability walkthrough, framed around the Team-A-writes-Hudi / Team-B-reads-Iceberg scenario."
+     },
+     {
+      "title": "Why Apache Iceberg & Open Lakehouse Is the Foundation for Data & AI",
+      "url": "https://www.youtube.com/watch?v=EqxXQNCIE0o",
+      "rt": false,
+      "alert": false,
+      "meta": "YouTube, recent, talk",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "His current thesis talk — Iceberg as the substrate for AI/agentic workloads, not just BI."
+     },
+     {
+      "title": "Building a Minimalistic Open Lakehouse with Spark, Nessie & Iceberg",
+      "url": "https://www.youtube.com/watch?v=aMOycqeqlmM",
+      "rt": false,
+      "alert": false,
+      "meta": "YouTube · notebook-style, talk",
+      "tags": [
+       "table-formats",
+       "catalog"
+      ],
+      "body": "The beginner build, live — the video companion to the Nessie notebook."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Dipankar Mazumdar, Apr–Nov 2026",
+    "entries": [
+     {
+      "title": "ASF Project Spotlight: Apache Iceberg",
+      "url": "https://news.apache.org/foundation/entry/asf-project-spotlight-apache-iceberg",
+      "rt": false,
+      "alert": false,
+      "meta": "The ASF · interview with Dipankar, Apr 2026, interview (missed earlier)",
+      "tags": [
+       "table-formats",
+       "indexing"
+      ],
+      "body": "Why Iceberg exists and how advocacy grew adoption, plus the roadmap he sees: wider schemas and semi structured data for AI workloads, faster metadata handling and commits as tables scale, and proposals for primary, secondary and vector indexes beyond file level stats. Read with Jack Vanlightly's Beyond Indexes below."
+     },
+     {
+      "title": "Inside Data Engineering with Dipankar Mazumdar",
+      "url": "https://www.junaideffendi.com/p/inside-data-engineering-with-dipankar",
+      "rt": false,
+      "alert": false,
+      "meta": "Junaid Effendi · interview, Aug 2026, interview",
+      "tags": [
+       "table-formats",
+       "catalog",
+       "streaming"
+      ],
+      "body": "His open platform reference architecture rests on three rules: open standards per layer, data interoperability through Iceberg, and catalog interoperability through the Iceberg REST spec. Field pattern: the question shifted from \"which platform do we standardize on\" to \"how should the data be represented\". Next for lakehouses: continuous optimization (layout, compaction, clustering), streaming / batch convergence with concurrent writes and metadata growth, and agents that need richer context and isolation. Maps closely onto a Polaris + ClickHouse + Flink design."
+     },
+     {
+      "title": "iceberg-mcp-server-trino",
+      "url": "https://github.com/dipankarmazumdar/iceberg-mcp-server-trino",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub · dipankarmazumdar, Jul 2026, code",
+      "tags": [
+       "catalog",
+       "ai-agents",
+       "mcp",
+       "compaction"
+      ],
+      "body": "Read only Iceberg MCP server over Trino: table metadata, health, time travel and performance tools. A template for letting an agent inspect Iceberg table health (snapshot counts, file sizes) without write access; compare with the Altinity agent guardrails post above."
+     },
+     {
+      "title": "Small File Problem in Data Lakehouse — Apache Iceberg Compaction",
+      "url": "https://www.youtube.com/watch?v=Xl92re55rYE",
+      "rt": true,
+      "alert": false,
+      "meta": "Cloudera Developers YouTube (his team; presenter not confirmed), 2026, video",
+      "tags": [
+       "compaction",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Why streaming writes create small files in Iceberg and how compaction fixes them. Pair with Sylvain Utard's tiered compaction post."
+     },
+     {
+      "title": "Cloudera Agent Studio & Iceberg MCP to Monitor Table Health",
+      "url": "https://www.youtube.com/watch?v=1WfZkRDd-YM",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera Developers YouTube (presenter not confirmed), 2026, video",
+      "tags": [
+       "ai-agents",
+       "mcp",
+       "observability"
+      ],
+      "body": "A demo of an agent watching Iceberg table health through the Iceberg MCP server. The video companion to the repo above."
+     },
+     {
+      "title": "A Deep Dive into Lakehouse Catalogs",
+      "url": "https://www.youtube.com/watch?v=Y61BpYDumsk",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera Developers YouTube (presenter not confirmed), 2026, video",
+      "tags": [
+       "catalog",
+       "rbac"
+      ],
+      "body": "A catalog walkthrough to watch alongside his Polaris Internals teardown, useful for anyone running Polaris."
+     },
+     {
+      "title": "A Guide to Debugging your Lakehouse (Apache Iceberg) Issues in Production",
+      "url": "https://www.cloudera.com/campaign/a-guide-to-debugging-your-lakehouse-apache-iceberg-issues-in-production.html",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera, 2026, whitepaper (gated; author not confirmed)",
+      "tags": [
+       "table-formats",
+       "operating",
+       "observability"
+      ],
+      "body": "Production Iceberg debugging guide from the Cloudera developer hub. Gated behind a form; worth one download for incident runbooks."
+     },
+     {
+      "title": "awesome-lakehouse-guide",
+      "url": "https://github.com/dipankarmazumdar/awesome-lakehouse-guide",
+      "rt": false,
+      "alert": false,
+      "meta": "GitHub · dipankarmazumdar, updated Sep 2026, curated list",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "His curated list of papers, posts and talks on Iceberg, Hudi, Delta and lakehouse architecture. Use it to spot newer Iceberg material for the next refresh."
+     },
+     {
+      "title": "Why Your Data Platform Needs to Run Where Your Data Lives",
+      "url": "https://community.cloudera.com/t5/Developer-Blogs/Why-Your-Data-Platform-Needs-to-Run-Where-Your-Data-Lives/ba-p/414585",
+      "rt": false,
+      "alert": false,
+      "meta": "Cloudera Community · dipankartnt, Sep 2026, essay (vendor flavored)",
+      "tags": [
+       "operating"
+      ],
+      "body": "Latency as a product requirement and the case for running the data platform in public, private, sovereign or edge environments. Mostly positioning for Cloudera Anywhere Cloud; low priority."
+     }
+    ]
+   },
+   {
+    "name": "Jack Vanlightly · table formats",
+    "entries": [
+     {
+      "title": "Beyond Indexes — How Open Table Formats Optimize Query Performance",
+      "url": "https://jack-vanlightly.com/blog/2025/10/8/beyond-indexes-how-open-table-formats-optimize-query-performance",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2025, essay",
+      "tags": [
+       "indexing",
+       "statistics",
+       "table-formats"
+      ],
+      "body": "The clearest model for Iceberg query speed: why OTFs have no real secondary indexes, and how layout + file/column statistics drive data skipping instead."
+     },
+     {
+      "title": "Have Your Iceberg Cubed, Not Sorted — Qbeast OTree Spatial Index",
+      "url": "https://jack-vanlightly.com/blog/2025/11/19/have-your-iceberg-cubed-not-sorted-meet-qbeast-the-otree-spatial-index",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2025, analysis",
+      "tags": [
+       "indexing",
+       "schema-evolution",
+       "table-formats"
+      ],
+      "body": "A genuine multidimensional spatial index (OTree) for Iceberg as an alternative to one-dimensional sort orders — where true indexing in OTFs may be heading."
+     },
+     {
+      "title": "Table Format Interoperability — Future or Fantasy?",
+      "url": "https://jack-vanlightly.com/blog/2024/9/26/table-format-interoperability-future-or-fantasy",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2024, analysis",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "Whether reading one physical table as Iceberg / Delta / Hudi interchangeably is realistic, and what actually blocks it."
+     },
+     {
+      "title": "Table Formats — Analyses (consistency models, TLA+)",
+      "url": "https://jack-vanlightly.com/analyses/category/Table+formats",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2022–24, series",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "His formally-verified teardown series of Iceberg/Delta/Hudi/Paimon consistency models — multi-writer conflicts, snapshot isolation, model-checked with TLA+."
+     },
+     {
+      "title": "Tableflow — the stream/table, Kafka/Iceberg duality",
+      "url": "https://jack-vanlightly.com/blog/2024/3/19/tableflow-the-stream-table-kafka-iceberg-duality",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2024, analysis",
+      "tags": [
+       "connectors",
+       "kappa",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Why materializing Kafka topics as Iceberg tables isn't just another sink — it reframes streaming itself. The clearest framing of the Kappa→Streamhouse arc."
+     },
+     {
+      "title": "Understanding Apache Fluss",
+      "url": "https://jack-vanlightly.com/blog/2025/9/2/understanding-apache-fluss",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, 2025, analysis",
+      "tags": [
+       "replication",
+       "table-formats"
+      ],
+      "body": "Code-level teardown of Fluss — Log Tables + RocksDB primary-key tables, Kafka-style replication, Arrow columnar storage, Paimon tiering."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Jack Vanlightly, 2026 posts + corpus backfill",
+    "entries": [
+     {
+      "title": "Apache Kafka performance #1 — linger.ms",
+      "url": "https://jack-vanlightly.com/blog/2026/7/7/apache-kafka-performance-1-lingerms",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, Jul 2026, benchmark",
+      "tags": [
+       "streaming",
+       "connectors",
+       "scaling",
+       "gotcha"
+      ],
+      "body": "Kafka 4.0 changed the producer default <code>linger.ms</code> from 0 to 5. What matters is the per producer, per partition send rate, not cluster throughput: expected batch ≈ 1 + linger\\_seconds × rate. At 5K rec/s across 120 producers, linger 5 only added latency; on a 100K rec/s keyed workload, linger 20 took p99.9 from 700+ ms to 23 ms. Check batch sizes on the Debezium / producer side before tuning Flink."
+     },
+     {
+      "title": "Kafka Share Groups and Parallelizing Consumption (series)",
+      "url": "https://jack-vanlightly.com/blog/2026/5/25/kafka-share-groups-and-parallelizing-consumption-part-1-tuning-maxpollrecords",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, May–Jun 2026, benchmark series",
+      "tags": [
+       "streaming",
+       "scaling",
+       "gotcha"
+      ],
+      "body": "Share groups (Kafka 4.2) cost about the same as consumer groups, but are easy to hold wrong: tune <code>max.poll.records</code> below <code>group.share.partition.max.record.locks</code> / consumers per partition, watch producer batch size under <code>share.acquire.mode=batch_optimized</code>, and avoid <code>record_limit</code> with fewer consumers than partitions (pathological fetch waits). Includes the broker visible vs client local parallelism side post. Relevant if you need queue semantics on Kafka."
+     },
+     {
+      "title": "Introducing Dimster, a performance benchmarking tool for Apache Kafka",
+      "url": "https://jack-vanlightly.com/blog/2026/5/20/introducing-dimster-a-performance-benchmarking-tool-for-apache-kafka",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, May 2026, tool",
+      "tags": [
+       "streaming",
+       "operating",
+       "code"
+      ],
+      "body": "Dimensional Kafka benchmarking on Kubernetes (a sweep across configs per run, self contained reproducible results, an explore limits mode); an easier alternative to OpenMessaging Benchmark. Useful before a broker or client upgrade."
+     },
+     {
+      "title": "Can We Agree on a Storage/Workload Architecture Taxonomy?",
+      "url": "https://jack-vanlightly.com/blog/2026/6/21/can-we-agree-on-a-storage/workload-architecture-taxonomy",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Jun 2026, essay (not read in full)",
+      "tags": [
+       "table-formats",
+       "architecture"
+      ],
+      "body": "Vocabulary for OLTP / OLAP / HTAP and the new \"LTAP\" (two workloads, two systems, shared storage), plus storage tiers, visibility and durable copies. Useful framing for explaining a Kafka + ClickHouse + Iceberg layout."
+     },
+     {
+      "title": "The LogDrive: Flexible Composition Through Abstraction in Shared Logs",
+      "url": "https://jack-vanlightly.com/blog/2026/8/25/the-logdrive-flexible-composition-through-abstraction-in-shared-logs",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Aug 2026, internals (not read in full)",
+      "tags": [
+       "streaming",
+       "replication"
+      ],
+      "body": "The OSDI 2026 LogDrive paper (Confluent) extends Delos virtual consensus into composable, RAID like loglets; it came out of K2 / Kora 2, the Kafka on S3 engine behind Freight Clusters. Follow up: <i>The AtomicLog + LogDrive: Strong vs weak sealing</i> (Aug 28). Deep theory; read for where diskless Kafka is heading."
+     },
+     {
+      "title": "Raise the ambition threshold",
+      "url": "https://jack-vanlightly.com/blog/2026/6/19/on-the-folly-of-tokenmaxxing",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Jun 2026, essay",
+      "tags": [
+       "culture",
+       "ai-agents"
+      ],
+      "body": "AI makes adding cheap, but every system adds obligations to operate, secure and retire it. Use AI to raise ambition, not to lower the value bar (\"catabolic collapse\"). A good lens for which agents and services are worth keeping."
+     },
+     {
+      "title": "Why I'm not a fan of zero-copy Apache Kafka-Apache Iceberg",
+      "url": "https://jack-vanlightly.com/blog/2025/10/15/why-im-not-a-fan-of-zero-copy-apache-kafka-apache-iceberg",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, Oct 2025, analysis",
+      "tags": [
+       "table-formats",
+       "connectors",
+       "schema-evolution",
+       "kappa"
+      ],
+      "body": "Shared tiering (Kafka tiering straight into Iceberg) moves cost from storage to broker CPU, forces a layout that is good for offsets but useless for analytics pruning, and collides with schema evolution and fidelity. He argues for internal tiering + materialization with clear ownership boundaries. A strong argument for Kafka Connect / Flink → Iceberg instead."
+     },
+     {
+      "title": "How Would You Like Your Iceberg Sir? Stream or Batch Ordered?",
+      "url": "https://jack-vanlightly.com/blog/2025/11/5/how-would-you-like-your-iceberg-sir-stream-or-batch-ordered",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, Nov 2025, analysis",
+      "tags": [
+       "table-formats",
+       "partitioning",
+       "streaming",
+       "backfill"
+      ],
+      "body": "Streaming bootstrap wants temporal (offset) order; batch queries want value order for pruning; one physical Iceberg layout can't serve both. Fluss keeps stream order (one copy); Tableflow keeps Kafka stream ordered and materializes an optionally batch ordered Iceberg copy. \"If you really need both, build two physical views.\" Directly relevant to how you sort bronze vs silver."
+     },
+     {
+      "title": "A Fork in the Road: Deciding Kafka's Diskless Future",
+      "url": "https://jack-vanlightly.com/blog/2025/10/22/a-fork-in-the-road-deciding-kafkas-diskless-future",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Oct 2025, analysis (not read in full)",
+      "tags": [
+       "streaming",
+       "replication",
+       "scaling"
+      ],
+      "body": "The three competing S3 topic KIPs (1150 diskless topics, 1176 tiered active segment, 1183 unified shared storage) and what each means for Kafka's next decade. Background for the LogDrive entry above."
+     },
+     {
+      "title": "A Conceptual Model for Storage Unification",
+      "url": "https://jack-vanlightly.com/blog/2025/8/21/a-conceptual-model-for-storage-unification",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Aug 2025, framework (not read in full)",
+      "tags": [
+       "table-formats",
+       "architecture"
+      ],
+      "body": "Seven considerations for stitching hot and historical storage into one logical view: tiered Kafka, HTAP, real time OLAP such as ClickHouse, and lakehouse integration. The vocabulary the two posts above build on."
+     },
+     {
+      "title": "The ultimate guide to table format internals — all my writing so far",
+      "url": "https://jack-vanlightly.com/blog/2024/10/28/the-ultimate-guide-to-table-format-internals",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Oct 2024, hub",
+      "tags": [
+       "table-formats"
+      ],
+      "body": "Index page for his Iceberg / Delta / Hudi / Paimon internals series and comparisons. Start here before the individual comparison posts."
+     },
+     {
+      "title": "Table format comparisons — Streaming ingest of row-level operations",
+      "url": "https://jack-vanlightly.com/blog/2024/8/22/table-format-comparisons-streaming-ingest-of-row-level-operations",
+      "rt": true,
+      "alert": false,
+      "meta": "Jack Vanlightly, Aug 2024, comparison (not read in full)",
+      "tags": [
+       "cdc",
+       "table-formats",
+       "streaming"
+      ],
+      "body": "How each format handles streaming upserts and deletes (copy on write vs merge on read, delete files, deletion vectors). The relevant comparison for CDC into Iceberg."
+     },
+     {
+      "title": "Table format comparisons — Change queries and CDC",
+      "url": "https://jack-vanlightly.com/blog/2024/9/19/table-format-comparisons-change-queries-and-cdc",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Sep 2024, comparison (not read in full)",
+      "tags": [
+       "cdc",
+       "table-formats"
+      ],
+      "body": "Reading changes back out of a table (incremental reads, changelog views) across formats; pairs with the Iceberg v2 change query deep dive linked from it."
+     },
+     {
+      "title": "Incremental Jobs and Data Quality Are On a Collision Course (Parts 1 & 2)",
+      "url": "https://jack-vanlightly.com/blog/2024/11/13/incremental-jobs-and-data-quality-are-on-a-collision-course-part-1-the-problem",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Nov 2024, essay (not read in full)",
+      "tags": [
+       "schema-evolution",
+       "cdc"
+      ],
+      "body": "Why incremental pipelines inherit upstream schema and quality breaks, and his proposal for data contracts / shifting responsibility left. Relevant to keeping CDC fed tables trustworthy."
+     },
+     {
+      "title": "Remediation: What happens after AI goes wrong?",
+      "url": "https://jack-vanlightly.com/blog/2025/7/28/remediation-what-happens-after-ai-goes-wrong",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Jul 2025, essay",
+      "tags": [
+       "ai-agents",
+       "war-story"
+      ],
+      "body": "The Replit prod DB deletion and Gemini CLI incidents: agents fail to recover, not just to behave, so remediation must be first class in agent design. Pair with the Altinity agent guardrails post in the ClickHouse section."
+     },
+     {
+      "title": "Coordinated Progress — Part 1 (series)",
+      "url": "https://jack-vanlightly.com/blog/2025/6/11/coordinated-progress-part-1",
+      "rt": false,
+      "alert": false,
+      "meta": "Jack Vanlightly, Jun 2025, series (not read in full)",
+      "tags": [
+       "streaming",
+       "architecture"
+      ],
+      "body": "A graph model for event driven architecture, stream processing, microservices and agents: reliable triggers plus progressable work, coupling and synchrony, and a decision framework. Useful for reasoning about failure boundaries across a Debezium → Kafka → Flink → ClickHouse chain."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "Apache Flink",
+  "blurb": "production blogs & talks — connectors, Kappa backfill, the real-time lakehouse",
+  "sections": [
+   {
+    "name": "What actually changed in 2.0 & 2.2",
+    "entries": [
+     {
+      "title": "Apache Flink 2.0.0 — A new era of real-time data processing",
+      "url": "https://flink.apache.org/2025/03/24/apache-flink-2.0.0-a-new-era-of-real-time-data-processing/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, Mar 2025, release blog",
+      "tags": [
+       "streaming"
+      ],
+      "body": "First major release in nine years. 165 contributors, 25 FLIPs, 369 issues. Java 8 dropped, per-job deployment mode removed (use Application mode), Disaggregated State Storage introduced. The starting gun for everything that follows."
+     },
+     {
+      "title": "Apache Flink 2.2.0 — Advancing real-time data + AI",
+      "url": "https://flink.apache.org/2025/12/04/apache-flink-2.2.0-advancing-real-time-data--ai-and-empowering-stream-processing-for-the-ai-era/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, Dec 2025, release blog",
+      "tags": [
+       "streaming"
+      ],
+      "body": "The AI era. ML\\_PREDICT for LLM inference, VECTOR\\_SEARCH for vector similarity. 9 FLIPs, 220+ issues, 73 contributors. Also bumps protobuf-java to 4.32.1 with Editions support — relevant if you serialize records as protobuf."
+     },
+     {
+      "title": "Disaggregated State Management in Apache Flink® 2.0",
+      "url": "https://www.vldb.org/pvldb/vol18/p4846-mei.pdf",
+      "rt": false,
+      "alert": false,
+      "meta": "Mei et al., VLDB 2025, academic paper",
+      "tags": [
+       "streaming",
+       "scaling"
+      ],
+      "body": "The canonical paper. Benchmarks: ForSt on local matches Flink 1.20; HDFS without cache degrades throughput 48% on heavy-I/O queries; with a 1 GB cache, Flink 2.0 reaches 75–120% of 1.x. Read if you care about state at scale."
+     },
+     {
+      "title": "Migrate to Apache Flink 2.2 on Amazon MSF",
+      "url": "https://aws.amazon.com/blogs/big-data/migrate-to-apache-flink-2-2-on-amazon-managed-service-for-apache-flink/",
+      "rt": true,
+      "alert": false,
+      "meta": "AWS Big Data Blog, Apr 2026, migration guide",
+      "tags": [
+       "migration",
+       "streaming",
+       "operating"
+      ],
+      "body": "The most practical upgrade walkthrough. Java 17 required (Java 11 dropped), Python 3.12 default (3.8 dropped), RocksDB 8.10.0 for faster checkpoints. Calls out the State Compatibility Guide for 1.x→2.2 — savepoint compatibility is not 100%."
+     },
+     {
+      "title": "Apache Flink 2.0 — Streaming into the future",
+      "url": "https://www.alibabacloud.com/blog/apache-flink-2-0-streaming-into-the-future_602008",
+      "rt": true,
+      "alert": false,
+      "meta": "Alibaba Cloud, Feb 2025, deep-dive",
+      "tags": [
+       "migration",
+       "connectors",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Explicit on the breakage. Savepoint and checkpoint compatibility is not guaranteed across 1.x → 2.0 due to serialization framework upgrades. The four priority connector migrations: Kafka, Paimon, JDBC, Elasticsearch."
+     },
+     {
+      "title": "Flink State Management — Core primitives to next-gen incremental computation",
+      "url": "https://www.alibabacloud.com/blog/flink-state-management-a-journey-from-core-primitives-to-next-generation-incremental-computation_602503",
+      "rt": false,
+      "alert": false,
+      "meta": "Alibaba Cloud, Aug 2025, walkthrough",
+      "tags": [
+       "streaming",
+       "operating"
+      ],
+      "body": "The mental-model build before the VLDB paper. NEXMark validation, performance neutrality for low-I/O queries, async framework bypass for stateless operators — read in this order: this piece, then VLDB."
+     }
+    ]
+   },
+   {
+    "name": "Postmortems & operational war stories",
+    "entries": [
+     {
+      "title": "Lessons from debugging a tricky direct memory leak",
+      "url": "https://medium.com/pinterest-engineering/lessons-from-debugging-a-tricky-direct-memory-leak-f638c722d9f2",
+      "rt": false,
+      "alert": false,
+      "meta": "Pinterest Engineering, 2023, war story",
+      "tags": [
+       "streaming",
+       "war-story",
+       "operating"
+      ],
+      "body": "Cleanest published Flink war story. JVM doesn't crash — Flink jumps to close() on failure, then open() on restart. A ChronicleMap referenced outside that lifecycle leaks on every retry. Walks the staircase-memory pattern you'll recognize on dashboards plus the nine debugging tenets."
+     },
+     {
+      "title": "Ten Flink Gotchas we wish we had known",
+      "url": "https://engineering.contentsquare.com/2021/ten-flink-gotchas/",
+      "rt": true,
+      "alert": false,
+      "meta": "ContentSquare Engineering, 2021, gotcha bible",
+      "tags": [
+       "streaming",
+       "war-story",
+       "gotcha",
+       "operating"
+      ],
+      "body": "Still the gotcha bible. Pre-2.x but every item applies — state TTL, serialization, watermarks, exactly-once boundaries. Read once; re-read before every production launch."
+     },
+     {
+      "title": "Tuning Flink Clusters for Stability and Efficiency",
+      "url": "https://medium.com/pinterest-engineering/tuning-flink-clusters-for-stability-and-efficiency-50d3d50384ed",
+      "rt": false,
+      "alert": false,
+      "meta": "Pinterest Engineering, 2023, tuning playbook",
+      "tags": [
+       "streaming",
+       "war-story",
+       "operating"
+      ],
+      "body": "Concrete tuning playbook from arguably the most operationally honest Flink shop in the curated list — Pinterest publishes roughly eight production-Flink pieces and each one is worth reading."
+     },
+     {
+      "title": "Where's my data — A unique encounter with Flink's Kinesis connector",
+      "url": "https://eng.lyft.com/wheres-my-data-a-unique-encounter-with-flink-streaming-s-kinesis-connector-6da3b11b164a",
+      "rt": true,
+      "alert": false,
+      "meta": "Lyft Engineering, 2023, debugging story",
+      "tags": [
+       "keeper",
+       "connectors",
+       "streaming",
+       "war-story"
+      ],
+      "body": "Short, well-told connector debugging story. Worth reading as much for the how-to-write-up-an-incident craft as the technical content."
+     },
+     {
+      "title": "Keep Calm and Flink On — Disaster proofing Apache Flink",
+      "url": "https://www.youtube.com/watch?v=_W_uhnK1G1I",
+      "rt": false,
+      "alert": false,
+      "meta": "Bloomberg, 2025, DR talk",
+      "tags": [
+       "indexing",
+       "migration",
+       "streaming",
+       "war-story"
+      ],
+      "body": "Directly relevant to secondary-cluster migration scenarios — DR strategy across Flink jobs, savepoint discipline, cross-region failover. Watch after the operations guides."
+     }
+    ]
+   },
+   {
+    "name": "Production operations",
+    "entries": [
+     {
+      "title": "Running Flink in Production — The Operations Guide",
+      "url": "https://streamkap.com/resources-and-guides/flink-production-guide",
+      "rt": true,
+      "alert": false,
+      "meta": "Streamkap, Feb 2026, comprehensive guide",
+      "tags": [
+       "observability",
+       "streaming",
+       "operating"
+      ],
+      "body": "Five memory pools, checkpoint config, state backends. Names consumer lag and checkpoint duration as the two operational metrics that matter most. The closest thing to a single-page production reference."
+     },
+     {
+      "title": "Flink Checkpointing Explained",
+      "url": "https://streamkap.com/resources-and-guides/flink-checkpointing-explained",
+      "rt": true,
+      "alert": false,
+      "meta": "Streamkap, Feb 2026, checkpoint deep-dive",
+      "tags": [
+       "streaming",
+       "operating"
+      ],
+      "body": "Internals plus production tuning. Calls out the tolerable-failures-set-to-zero footgun — default kills the job on any single checkpoint failure; production wants 3–10."
+     },
+     {
+      "title": "Mastering Apache Flink in Production — Monitoring & Optimization",
+      "url": "https://bigdataboutique.com/blog/mastering-apache-flink-in-production-a-guide-to-monitoring-and-optimization-0b50d7",
+      "rt": false,
+      "alert": false,
+      "meta": "BigDataBoutique, Aug 2025, monitoring",
+      "tags": [
+       "observability",
+       "streaming",
+       "operating"
+      ],
+      "body": "Prometheus reporter config, savepoint discipline, JobManager HA. The closest single-page Flink equivalent to that Tinybird ClickHouse-metrics thread you bookmarked."
+     },
+     {
+      "title": "Optimize Checkpointing — Buffer Debloating & Unaligned Checkpoints (Pts 1 & 2)",
+      "url": "https://aws.amazon.com/blogs/big-data/optimize-checkpointing-in-your-amazon-managed-service-for-apache-flink-applications-with-buffer-debloating-and-unaligned-checkpoints-part-2/",
+      "rt": true,
+      "alert": false,
+      "meta": "AWS Big Data Blog, 2024, config guide",
+      "tags": [
+       "streaming",
+       "operating"
+      ],
+      "body": "Practical config for high-throughput Kafka. Unaligned checkpoints decouple checkpoint duration from throughput — but add I/O to state storage, so don't use them if state I/O is already the bottleneck."
+     }
+    ]
+   },
+   {
+    "name": "Connectors — ClickHouse",
+    "entries": [
+     {
+      "title": "Official ClickHouse Flink Connector (GitHub)",
+      "url": "https://github.com/ClickHouse/flink-connector-clickhouse",
+      "rt": true,
+      "alert": false,
+      "meta": "ClickHouse / flink-connector-clickhouse, canonical source",
+      "tags": [
+       "connectors",
+       "streaming"
+      ],
+      "body": "Built on AsyncSinkBase plus the official ClickHouse Java client. DataStream API. Two artifacts: one for Flink 1.17+ and one for Flink 2.0+ — pin the right one or builds fail in subtle ways."
+     },
+     {
+      "title": "ClickHouse Flink Connector docs",
+      "url": "https://clickhouse.com/docs/integrations/apache-flink",
+      "rt": true,
+      "alert": false,
+      "meta": "ClickHouse.com, official docs",
+      "tags": [
+       "connectors",
+       "streaming"
+      ],
+      "body": "Read for the sharp edges. Sink is at-least-once today; exactly-once is tracked. No DLQ — failed inserts retry then drop. No Flink SQL / Table API yet. Plan around all three."
+     },
+     {
+      "title": "Challenges of connecting Flink to ClickHouse",
+      "url": "https://www.glassflow.dev/blog/challenges-connecting-flink-clickhouse",
+      "rt": true,
+      "alert": false,
+      "meta": "Glassflow, Mar 2025, skeptic piece",
+      "tags": [
+       "connectors",
+       "streaming"
+      ],
+      "body": "The honest why-this-is-hard piece. Flink exactly-once needs 2PC; ClickHouse lacks full ACID. Vendor-leaning conclusion (they sell the workaround) but the architectural diagnosis is correct."
+     },
+     {
+      "title": "Solution to exactly-once insertion from Flink to ClickHouse",
+      "url": "https://medium.com/smartnews-inc/solution-to-exactly-once-insertion-from-flink-to-clickhouse-70fd77f83d40",
+      "rt": true,
+      "alert": false,
+      "meta": "SmartNews, 2022, war story workaround",
+      "tags": [
+       "connectors",
+       "streaming",
+       "war-story"
+      ],
+      "body": "A temporary table in ClickHouse holds pre-committed data; drop and recreate on retry. Trades resources for accuracy. Read for the mental model even if you don't ship the exact code."
+     },
+     {
+      "title": "Alibaba RTC ClickHouse connector docs",
+      "url": "https://www.alibabacloud.com/help/en/flink/realtime-flink/developer-reference/clickhouse-connector",
+      "rt": true,
+      "alert": false,
+      "meta": "Alibaba Cloud, production reference",
+      "tags": [
+       "schema-evolution",
+       "connectors",
+       "streaming",
+       "gotcha"
+      ],
+      "body": "The most thorough production reference because Alibaba runs it at scale. Versioning gotchas — exactly-once on EMR ClickHouse needs VVR 4.0.11+ and is gone for EMR V3.45.1+. Also: ALTER TABLE UPDATE/DELETE performance cliff when ignoreDelete=false."
+     },
+     {
+      "title": "ClickHouse Sink Connector for Confluent Cloud",
+      "url": "https://docs.confluent.io/cloud/current/connectors/cc-clickhouse-sink-connector/cc-clickhouse-sink.html",
+      "rt": true,
+      "alert": false,
+      "meta": "Confluent Docs, alternative path",
+      "tags": [
+       "backfill",
+       "schema-evolution",
+       "connectors",
+       "streaming"
+      ],
+      "body": "The Kafka Connect alternative to a Flink sink. exactlyOnce=true requires proper primary key configuration in ClickHouse and replays still produce duplicates that queries must handle. Useful comparison point."
+     }
+    ]
+   },
+   {
+    "name": "Connectors — Iceberg as sink",
+    "entries": [
+     {
+      "title": "Apache Flink CDC 3.4.0 Release Announcement",
+      "url": "https://flink.apache.org/2025/05/16/apache-flink-cdc-3.4.0-release-announcement/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, May 2025, release blog",
+      "tags": [
+       "connectors",
+       "cdc",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The moment Iceberg became a first-class Flink CDC pipeline sink. By 3.5, the connector matrix spans Doris, Hudi, Iceberg, MySQL, Postgres, OceanBase, Oracle, Paimon, Fluss, StarRocks, Kafka, Elasticsearch, MaxCompute, Db2, MongoDB, SQL Server."
+     },
+     {
+      "title": "Iceberg Pipeline Connector (Flink CDC)",
+      "url": "https://nightlies.apache.org/flink/flink-cdc-docs-master/docs/connectors/pipeline-connectors/iceberg/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Flink CDC, official docs",
+      "tags": [
+       "connectors",
+       "cdc",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Auto table creation, schema synchronization, batch + streaming. Sharp edge to pin: source table must have a primary key; exactly-once is not supported on this pipeline path."
+     },
+     {
+      "title": "Streaming Event-Time Partitioning with Flink and Iceberg",
+      "url": "https://www.slideshare.net/slideshow/streaming-event-time-partitioning-with-apache-flink-and-apache-iceberg-julia-bennett-netflix/181948223",
+      "rt": true,
+      "alert": false,
+      "meta": "Julia Bennett · Netflix, Flink Forward talk",
+      "tags": [
+       "partitioning",
+       "compaction",
+       "replacingmergetree",
+       "connectors"
+      ],
+      "body": "The canonical Netflix war-story talk. 250 M events/day produces \\~100 K files/day with the obvious approach. Netflix's pattern: dedupe key state + side-output windows for late events + dynamic partitioner + offline compaction. Required watching."
+     },
+     {
+      "title": "Apache Flink 1.18+ & Apache Iceberg CDC Integration",
+      "url": "https://olake.io/iceberg/query-engine/flink/",
+      "rt": true,
+      "alert": false,
+      "meta": "OLake, reference implementation",
+      "tags": [
+       "connectors",
+       "cdc",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Iceberg's native Flink sink commits on each checkpoint with exactly-once. INSERT append always available; row-level via write.upsert.enabled=true on spec v2 tables. MERGE INTO is not in Flink SQL — Copy-on-Write for static rewrites, Merge-on-Read for streaming upserts."
+     },
+     {
+      "title": "Approaches to Streaming Data into Apache Iceberg Tables",
+      "url": "https://dev.to/alexmercedcoder/approaches-to-streaming-data-into-apache-iceberg-tables-27k5",
+      "rt": true,
+      "alert": false,
+      "meta": "Alex Merced, Iceberg Masterclass Pt 13",
+      "tags": [
+       "connectors",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The architecture lens with the warning that matters most."
+     },
+     {
+      "title": "A Guide to CDC with Apache Iceberg",
+      "url": "https://www.dremio.com/blog/cdc-with-apache-iceberg/",
+      "rt": true,
+      "alert": false,
+      "meta": "Dremio, Aug 2025, practical walkthrough",
+      "tags": [
+       "schema-evolution",
+       "connectors",
+       "cdc",
+       "streaming"
+      ],
+      "body": "The Debezium → Kafka → Flink → Iceberg pipeline walkthrough. Parse the op field, map to Iceberg INSERT/UPDATE/DELETE, enable schema evolution, exactly-once delivery, Kafka transactional topics. Touches every component."
+     },
+     {
+      "title": "Building a Real-Time Data Lake with Flink CDC",
+      "url": "https://nightlies.apache.org/flink/flink-cdc-docs-master/docs/connectors/flink-sources/tutorials/build-real-time-data-lake-tutorial/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Flink CDC, official tutorial",
+      "tags": [
+       "connectors",
+       "cdc",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "MySQL → Iceberg hands-on. Crucial production detail buried in the tutorial: checkpointing is disabled by default and must be enabled to commit Iceberg transactions; the mysql-cdc binlog phase requires a complete checkpoint to avoid binlog disorder."
+     }
+    ]
+   },
+   {
+    "name": "Iceberg as a streaming source",
+    "entries": [
+     {
+      "title": "Streaming from Apache Iceberg — Building Low-Latency & Cost-Effective Data Pipelines",
+      "url": "https://www.infoq.com/presentations/apache-iceberg-streaming",
+      "rt": true,
+      "alert": false,
+      "meta": "Steven Wu · Apple (ex-Netflix), InfoQ presentation",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The canonical talk. Wu designed the Flink-Iceberg integration. Compares Kafka vs Iceberg as streaming sources and walks the stream-processing use cases the Iceberg source can power. 48 minutes. Watch this before anything else in this section."
+     },
+     {
+      "title": "Apple Meetup — Streaming from Iceberg Data Lake & Multi Cluster Kafka Source",
+      "url": "https://www.youtube.com/watch?v=H1SYOuLcUTI",
+      "rt": true,
+      "alert": false,
+      "meta": "Wu et al. · Apple, Jun 2022, talk",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Companion talk plus the multi-cluster Kafka source — directly relevant to multi-cluster Kafka setups."
+     },
+     {
+      "title": "Iceberg Flink Queries & Streaming Read (official docs)",
+      "url": "https://iceberg.apache.org/docs/latest/flink/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Iceberg, official docs",
+      "tags": [
+       "observability",
+       "streaming",
+       "table-formats",
+       "gotcha"
+      ],
+      "body": "The API surface. OPTIONS('streaming'='true', 'monitor-interval'='1s') in SQL hints; start-snapshot-id to start from a specific point. FLIP-27 source toggle via table.exec.iceberg.use-flip27-source = true is the gotcha — most blog code uses the old SourceFunction interface."
+     }
+    ]
+   },
+   {
+    "name": "Lakehouse integrations — Fluss, Paimon",
+    "entries": [
+     {
+      "title": "Announcing Fluss 0.7",
+      "url": "https://fluss.apache.org/blog/releases/0.7/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Fluss, Jun 2025, release blog",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Lake tiering service made stateless and pluggable across Iceberg/Paimon. The pivot away from \"lake tier is a Flink job with sync offsets in Flink State\" — single point of failure, opaque state. Sync offset now lives in Fluss metadata."
+     },
+     {
+      "title": "Apache Fluss vs Apache Paimon — Two engines for the real-time lakehouse",
+      "url": "https://www.alibabacloud.com/blog/apache-fluss-vs%E2%80%94%E2%80%8Bapache-paimon-two-engines-for-the-real-time-lakehouse_602687",
+      "rt": true,
+      "alert": false,
+      "meta": "Alibaba Cloud, Nov 2025, architecture",
+      "tags": [
+       "streaming",
+       "table-formats",
+       "joins"
+      ],
+      "body": "The Taobao case is the eye-opener: Fluss replaces dual-stream joins with Delta Joins — querying Fluss directly instead of caching the dimension table in Flink state — and cut a 100 TB job's checkpoint from 90 s to 1 s."
+     },
+     {
+      "title": "When Paimon Beats Iceberg for Mutable Streams",
+      "url": "https://datalakehousehub.com/blog/2026-05-paimon-vs-iceberg-mutable-streams/",
+      "rt": true,
+      "alert": false,
+      "meta": "DataLakehouseHub, May 2026, decision framework",
+      "tags": [
+       "cdc",
+       "streaming",
+       "table-formats",
+       "catalog"
+      ],
+      "body": "When to pick Paimon vs Iceberg. Paimon: high-frequency CDC, Flink-native execution, real-time freshness required, steeper LSM-tuning curve. Iceberg: larger user base, more documented failure patterns, better catalog tooling. Read before committing either way."
+     },
+     {
+      "title": "Fluss Streaming Lakehouse Quickstart",
+      "url": "https://fluss.apache.org/docs/quickstart/lakehouse/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Fluss, official docs",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The actual wiring. Flink reads the latest Paimon snapshot via the tiering service, then switches to Fluss from the aligned log offset — exactly-once semantics across the boundary. The union-read pattern that makes warm/cold work."
+     }
+    ]
+   },
+   {
+    "name": "The Tableflow paradigm — Kafka segments as Iceberg",
+    "entries": [
+     {
+      "title": "Introducing Tableflow — Unifying streaming & analytics",
+      "url": "https://www.confluent.io/blog/introducing-tableflow/",
+      "rt": true,
+      "alert": false,
+      "meta": "Confluent, Mar 2025, announcement",
+      "tags": [
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The Kora Storage Layer takes Kafka segments and writes them out as parquet. Materialize topics as Iceberg or Delta Lake tables in a click. The architectural pivot: you don't ingest into a lakehouse anymore; the streaming layer is the lakehouse."
+     },
+     {
+      "title": "Tableflow Docs (Confluent Cloud)",
+      "url": "https://docs.confluent.io/cloud/current/topics/tableflow/overview.html",
+      "rt": true,
+      "alert": false,
+      "meta": "Confluent, operational reference",
+      "tags": [
+       "schema-evolution",
+       "cdc",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Automatic schematization, type conversions, schema evolution, CDC stream materialization, catalog publishing. Tables read by any analytics engine without duplication. Flink sits before Tableflow if you need transformations — not between Kafka and the lake."
+     },
+     {
+      "title": "Kafka to Iceberg — Exploring the options",
+      "url": "https://rmoff.net/2025/08/18/kafka-to-iceberg-exploring-the-options/",
+      "rt": true,
+      "alert": false,
+      "meta": "Robin Moffat (rmoff), Aug 2025, honest comparison",
+      "tags": [
+       "connectors",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The honest comparison piece. Walks every option side-by-side: Flink SQL, Kafka Connect Iceberg sink, Tableflow, multi-cluster-to-single-table. Moffat is the most reliable independent voice in the Kafka world. Read before deciding the path."
+     },
+     {
+      "title": "Sending Data to Apache Iceberg from Apache Kafka with Apache Flink",
+      "url": "https://www.decodable.co/blog/kafka-to-iceberg-with-flink",
+      "rt": true,
+      "alert": false,
+      "meta": "Robin Moffat · Decodable, Jul 2024, open-source path",
+      "tags": [
+       "streaming",
+       "table-formats",
+       "catalog"
+      ],
+      "body": "Open-source hands-on counterpart to Tableflow. MinIO for storage, Hive Metastore catalog, Flink SQL for both the ingest and inline transformations."
+     },
+     {
+      "title": "From Stream to Lakehouse — Kafka ingestion with the Flink Dynamic Iceberg Sink",
+      "url": "https://flink.apache.org/2025/11/11/from-stream-to-lakehouse-kafka-ingestion-with-the-flink-dynamic-iceberg-sink/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, Nov 2025, official blog",
+      "tags": [
+       "schema-evolution",
+       "connectors",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The most current production pattern. Dynamic sink writes to multiple Iceberg tables with full schema evolution. A single unified pipeline ingests from any number of topics, writes to any number of tables, handles new topics and schema changes without restarts."
+     }
+    ]
+   },
+   {
+    "name": "Kappa architecture",
+    "entries": [
+     {
+      "title": "Questioning the Lambda Architecture",
+      "url": "https://www.oreilly.com/radar/questioning-the-lambda-architecture/",
+      "rt": true,
+      "alert": false,
+      "meta": "Jay Kreps · O'Reilly Radar, 2014, the original",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The original. The piece that named Kappa and argued Lambda's dual-code burden was avoidable if you treat the log as primary and replay through a single stream processor. Worth re-reading every few years; everything since is a footnote."
+     },
+     {
+      "title": "The Rise of Kappa Architecture in the Era of Agentic AI and Data Streaming",
+      "url": "https://www.kai-waehner.de/blog/2025/07/08/the-rise-of-kappa-architecture-in-the-era-of-agentic-ai-and-data-streaming/",
+      "rt": true,
+      "alert": false,
+      "meta": "Kai Waehner, Jul 2025, current state",
+      "tags": [
+       "kappa",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "Current state-of-play. Open table formats and Shift-Left principles position Kappa as the foundation for governed data platforms. Confluent-leaning voice but well-sourced and current."
+     },
+     {
+      "title": "From Kappa Architecture to Streamhouse — Making the Lakehouse real-time",
+      "url": "https://www.ververica.com/blog/from-kappa-architecture-to-streamhouse-making-lakehouses-real-time",
+      "rt": true,
+      "alert": false,
+      "meta": "Ververica, Mar 2026, evolution",
+      "tags": [
+       "kappa",
+       "streaming",
+       "table-formats"
+      ],
+      "body": "The architectural evolution. Streamhouse combines real-time streaming with Lakehouse analytics, driven by Paimon and Fluss integrated with Flink. The architectural bet behind Grab's Hugo and the CDP scenarios you already know."
+     },
+     {
+      "title": "Introduction to Unified Batch & Stream Processing of Apache Flink",
+      "url": "https://www.alibabacloud.com/blog/introduction-to-unified-batch-and-stream-processing-of-apache-flink_601407",
+      "rt": true,
+      "alert": false,
+      "meta": "Alibaba Cloud, Jul 2024, honest framing",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The Flink-native framing — and the honest \"Kappa isn't free either\" piece. Kappa removes the batch layer and gets replay from message-queue retention, but cannot provide batch benefits; backtracking performance is inferior to batch."
+     },
+     {
+      "title": "The Kappa Architecture — Simplifying data pipelines with streaming",
+      "url": "https://streamkap.com/resources-and-guides/kappa-architecture-guide",
+      "rt": true,
+      "alert": false,
+      "meta": "Streamkap, Feb 2026, practical guide",
+      "tags": [
+       "kappa",
+       "streaming"
+      ],
+      "body": "Practical decision lens. Kappa works when processing logic is the same for real-time and historical. Lambda forces dual codebases (Spark for batch, Flink for streaming). Read for the decision framework, not the architecture history."
+     }
+    ]
+   },
+   {
+    "name": "Backfilling in Kappa — the hardest problem",
+    "entries": [
+     {
+      "title": "Designing a Production-Ready Kappa Architecture for Timely Data Stream Processing",
+      "url": "https://www.uber.com/blog/kappa-architecture-data-stream-processing/",
+      "rt": true,
+      "alert": false,
+      "meta": "Uber Engineering, Mar 2020, seminal",
+      "tags": [
+       "backfill",
+       "connectors",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The seminal article on Kappa backfill. Both common methodologies — replaying Hive into Kafka, and backfilling as a batch job — failed to scale. Solution: model the Hive connector as a streaming source. Spark Streaming implementation but principles apply to Flink. The mistake-list alone is worth the read."
+     },
+     {
+      "title": "Backfill Streaming Data Pipelines in Kappa Architecture",
+      "url": "https://microsites.databricks.com/sites/default/files/2022-07/Backfill%20Streaming%20Data%20Pipelines%20in%20Kappa%20Architecture.pdf",
+      "rt": true,
+      "alert": false,
+      "meta": "Waibel & Ananthanarayanan · Netflix, Data + AI Summit deck",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming",
+       "joins"
+      ],
+      "body": "The Flink-native counterpart to Uber's piece. RMI (Real-time Merched Impression) joins Impression with Playback events for play attribution — one of the largest stateful Flink apps at Netflix. Backfill in Kappa style using the Data Lake plus the event-ordering challenges they hit."
+     },
+     {
+      "title": "Unified Flink Source at Pinterest — Streaming data processing",
+      "url": "https://medium.com/pinterest-engineering/unified-flink-source-at-pinterest-streaming-data-processing-c9d4e89f2ed6",
+      "rt": true,
+      "alert": false,
+      "meta": "Pinterest Engineering, Jul 2021, architectural pattern",
+      "tags": [
+       "partitioning",
+       "backfill",
+       "kappa",
+       "streaming"
+      ],
+      "body": "Kafka retention is 3 days to under 8 hours; replaying historical via Kafka costs 20× the infrastructure. Solution: Merced stores data on S3 keeping original event ordering and partitions; UnifiedSource combines FlinkKafkaConsumer and MercedFileSource per SubTask. Same architectural shape as Grab's Hugo."
+     },
+     {
+      "title": "Engineering a Reliable Data Backfill Solution",
+      "url": "https://engineering.contentsquare.com/2023/engineering-a-reliable-data-backfill-solution/",
+      "rt": true,
+      "alert": false,
+      "meta": "ContentSquare Engineering, 2023, operational hack",
+      "tags": [
+       "backfill",
+       "replication",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The operational hack you need. 600 MB/s scale with stateful Flink for sessionization. Backfill line: backups + tooling + dedicated Kafka cluster + sandbox replica of prod."
+     },
+     {
+      "title": "Parallelizing Historic Backfills with Flink",
+      "url": "https://stefanvercillo.com/blog/archive-replay",
+      "rt": true,
+      "alert": false,
+      "meta": "Stefan Vercillo, implementation",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The implementation deep-dive. Hits the watermark-divergence problem directly: parallelizing across key groups means fast threads race ahead and slow threads' valid records arrive \"late,\" getting dropped from windows. Fix: Java CyclicBarrier for lockstep progress."
+     },
+     {
+      "title": "Dynamic CDC with Flink CDC and Consistent Hashing",
+      "url": "https://www.slideshare.net/slideshow/dynamic-change-data-capture-with-flink-cdc-and-consistent-hashing/262764724",
+      "rt": true,
+      "alert": false,
+      "meta": "Goldsky, Flink Forward 2023, CDC war story",
+      "tags": [
+       "backfill",
+       "replication",
+       "connectors",
+       "cdc"
+      ],
+      "body": "CDC backfill war story. \"Things didn't work — the connector tried to use the replication slot during snapshotting.\" The algorithm that fixed it: stop live event processing → read next chunk → resume live → reconcile via watermarks."
+     },
+     {
+      "title": "Flink CDC Incremental Snapshot Framework",
+      "url": "https://nightlies.apache.org/flink/flink-cdc-docs-master/docs/connectors/flink-sources/mysql-cdc/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Flink CDC, official docs",
+      "tags": [
+       "backfill",
+       "cdc",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The modern auto-managed backfill. Distributed chunk-based scanning; checkpoint at chunk level resolves the timeout problem of the old snapshot mechanism; no global read lock. Gotcha: non-uniform PK distribution leads to unbalanced tasks during snapshot read."
+     },
+     {
+      "title": "Principle Analysis of Apache Flink CDC Batch & Stream Integration",
+      "url": "https://www.alibabacloud.com/blog/principle-analysis-of-apache-flink-cdc-batch-and-stream-integration_598973",
+      "rt": true,
+      "alert": false,
+      "meta": "Alibaba Cloud, algorithm explainer",
+      "tags": [
+       "backfill",
+       "cdc",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The algorithm explainer. Binlog read from an offset, snapshot split for a key found, its max binlog offset found; current offset > max → send, else discard. MySqlHybridSplitAssigner, MySqlValidator. Read after the docs if you want the why."
+     },
+     {
+      "title": "Backfill Upsert Table via Flink/Pinot Connector",
+      "url": "https://speakerdeck.com/startree/apache-pinot-connector-yupeng-fu-uber-rta-summit-2023",
+      "rt": true,
+      "alert": false,
+      "meta": "Yupeng Fu · Uber, RTA Summit 2023, specialty path",
+      "tags": [
+       "backfill",
+       "connectors",
+       "kappa",
+       "streaming"
+      ],
+      "body": "The upsert-target backfill workaround. Generate upsert segments directly from batch sources like Hive — no Kafka dependency. The pattern generalizes to any \"must be real-time\" sink (Pinot, some StarRocks setups, some ClickHouse configurations)."
+     },
+     {
+      "title": "How Uber Manages Petabytes of Real-Time Data",
+      "url": "https://blog.bytebytego.com/p/how-uber-manages-petabytes-of-real",
+      "rt": true,
+      "alert": false,
+      "meta": "ByteByteGo, Oct 2024, summary",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming",
+       "scaling"
+      ],
+      "body": "\"Kappa+\" is Uber's coinage — the canonical name for \"Kappa with first-class backfill.\" Active-Active Kafka, FlinkSQL, Pinot upserts. Higher-level summary connecting the pieces."
+     },
+     {
+      "title": "How Uber uses Apache Kafka in production",
+      "url": "https://factorhouse.io/articles/uber-kafka-architecture",
+      "rt": true,
+      "alert": false,
+      "meta": "Factor House, May 2026, current state",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming",
+       "gotcha"
+      ],
+      "body": "Kafka tiered storage via KIP-405 changes the Kappa-backfill calculus by extending Kafka retention cheaply. Recent log segments on broker disk, older offloaded transparently to HDFS/S3/GCS/Azure. May reduce the need for a Merced-style sidecar entirely."
+     },
+     {
+      "title": "Backfilling historical data with pipelines",
+      "url": "https://docs.databricks.com/gcp/en/ldp/flows-backfill",
+      "rt": true,
+      "alert": false,
+      "meta": "Databricks Lakeflow, decision framework",
+      "tags": [
+       "backfill",
+       "kappa",
+       "streaming"
+      ],
+      "body": "Cleanest conceptual reference. Scenarios needing backfill, considerations (idempotency, schema compatibility, SLA-sized batches). Databricks-specific implementation (ONCE flow), generic principles that transfer."
+     }
+    ]
+   },
+   {
+    "name": "Kubernetes & the Operator",
+    "entries": [
+     {
+      "title": "Flink Kubernetes Operator 1.14.0",
+      "url": "https://flink.apache.org/posts/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, Feb 2026, release blog",
+      "tags": [
+       "streaming",
+       "operating"
+      ],
+      "body": "Native Blue/Green deployment support for stateful streaming applications. People have been hand-rolling this pattern for years — now upstream."
+     },
+     {
+      "title": "Flink Kubernetes Operator — Autoscaler",
+      "url": "https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-main/docs/custom-resource/autoscaler/",
+      "rt": true,
+      "alert": false,
+      "meta": "Apache Flink Kubernetes Operator, official docs",
+      "tags": [
+       "partitioning",
+       "observability",
+       "connectors",
+       "streaming"
+      ],
+      "body": "Works best with Kafka sources (standardized connector metrics). Auto-detects source max parallelism from Kafka partition count. Requires the new Source API exposing the busyTime metric. Context: this is upstream — Grab's Predictive Resource Advisor sits on top of, not instead of."
+     },
+     {
+      "title": "Get Running with Apache Flink on Kubernetes (Parts 1 & 2)",
+      "url": "https://www.decodable.co/blog/get-running-with-apache-flink-on-kubernetes-1",
+      "rt": false,
+      "alert": false,
+      "meta": "Decodable, Jan 2025, practical walkthrough",
+      "tags": [
+       "observability",
+       "rbac",
+       "streaming",
+       "operating"
+      ],
+      "body": "Vendor-authored but unbiased Operator walkthrough. Installation, custom resources, fault tolerance, HA, savepoints, observability, UI access. Good first-touch reference."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Flink sources, Jun–Nov 2026",
+    "entries": [
+     {
+      "title": "Apache Flink 2.3.0 Release Announcement",
+      "url": "https://flink.apache.org/2026/06/25/apache-flink-2.3.0-release-announcement/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC, Jun 2026, release (from the announcement and release PR, not read in full)",
+      "tags": [
+       "streaming",
+       "migration",
+       "operating"
+      ],
+      "body": "Changelog conversion operators in SQL (moving between upsert and append streams in SQL rather than Java), more flexible materialized tables, the experimental native S3 filesystem (next entry), application management and rescale history for elastic scaling, plus a BITMAP type and NDU analyzer improvements. 2.3 is now the stable docs line, with 1.20 as LTS. The changelog operators matter most for SQL-first teams."
+     },
+     {
+      "title": "Introducing Flink's Native S3 FileSystem: Built for Performance, Designed for Production",
+      "url": "https://flink.apache.org/2026/06/26/announcing-native-s3-fs/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC · Gabor Somogyi & Samrat Deb, Jun 2026, post",
+      "tags": [
+       "streaming",
+       "operating",
+       "scaling"
+      ],
+      "body": "<code>flink-s3-fs-native</code>: Hadoop free, on AWS SDK v2, one plugin for both FileSystem and RecoverableWriter (so exactly once FileSink, which Presto lacked). Benchmark vs the Presto plugin: \\~2.17× throughput, average checkpoint 48.8s vs 90.1s, P99 76.7s vs 165.3s. Mostly a drop in jar swap; one way migration (Hadoop / Presto sink state restores on native, not the reverse). Worth testing for checkpoints and Iceberg writes on object storage."
+     },
+     {
+      "title": "Apache Flink CDC 3.7.0 Release Announcement",
+      "url": "https://flink.apache.org/2026/10/10/apache-flink-cdc-3.7.0-release-announcement/",
+      "rt": true,
+      "alert": false,
+      "meta": "Flink PMC · Xiqian Yu, Oct 2026, release",
+      "tags": [
+       "cdc",
+       "connectors",
+       "schema-evolution",
+       "gotcha"
+      ],
+      "body": "Notable reliability fixes: MySQL CDC sources stuck during binlog backfill (FLINK-39621, FLINK-39315), newly added table recovery after region failover, the Iceberg sink writing duplicates when a schema change splits writes in a checkpoint or an update moves partitions (FLINK-38450/40640), and Debezium JSON with column defaults. Also new: an existing table schema <code>CHECK</code> / <code>EXPAND</code> mode for sinks, a SQL Server source, and AI transform functions in YAML pipelines."
+     },
+     {
+      "title": "Apache Flink Kubernetes Operator 1.16.0 Release Announcement",
+      "url": "https://flink.apache.org/",
+      "rt": false,
+      "alert": false,
+      "meta": "Flink PMC · Dennis-Mircea Ciupitu, Sep 2026, release (not read; linked from the Flink homepage)",
+      "tags": [
+       "operating",
+       "migration"
+      ],
+      "body": "Focused on extensibility and a restructured documentation set; follows 1.14's native Blue/Green deployments (indexed above)."
+     },
+     {
+      "title": "Apache Flink Agents 0.4.0 Release Announcement",
+      "url": "https://flink.apache.org/2026/10/30/apache-flink-agents-0.4.0-release-announcement/",
+      "rt": false,
+      "alert": false,
+      "meta": "Flink PMC · Wenjin Xie, Oct 2026, release (not read in full)",
+      "tags": [
+       "ai-agents",
+       "streaming"
+      ],
+      "body": "AI agents inside Flink streaming pipelines, with Flink's distributed execution and fault recovery. Still a preview, but billed as the last step before 1.0; 0.3 (Jun) added a YAML API, Mem0 long term memory and a Fluss backed action state store. Watch, don't adopt yet; it could eventually host event-driven agents next to existing pipelines."
+     }
+    ]
+   },
+   {
+    "name": "Refresh · Robin Moffatt, Jan–Nov 2026",
+    "entries": [
+     {
+      "title": "Materialized Tables in Apache Flink",
+      "url": "https://dev.to/rmoff/materialized-tables-in-apache-flink-b6d",
+      "rt": true,
+      "alert": false,
+      "meta": "Robin Moffatt (rmoff.net, mirrored on dev.to), Apr 2026, hands-on",
+      "tags": [
+       "streaming",
+       "catalog",
+       "ddl",
+       "gotcha"
+      ],
+      "body": "FLIP-435 materialized tables (since 1.20) put the populate-and-refresh SQL inside the table definition, compared with CREATE TABLE + INSERT and CTAS. They need a catalog that supports them plus a scheduler (the SQL Gateway ships a basic one); only Paimon and the test-filesystem catalog support everything. <b>Gotcha:</b> Iceberg's Flink catalog does not support them. Robin's <a href=\"https://mail-archive.com/issues@iceberg.apache.org/msg221858.html\">Iceberg PR #16079</a> replaces the cryptic error with a clear one. Check this before planning on 2.3's materialized table features on an Iceberg catalog such as Polaris."
+     },
+     {
+      "title": "Alternatives to MinIO for single-node local S3",
+      "url": "https://rmoff.net/2026/01/14/alternatives-to-minio-for-single-node-local-s3/",
+      "rt": false,
+      "alert": false,
+      "meta": "Robin Moffatt, Jan 2026, comparison + code",
+      "tags": [
+       "table-formats",
+       "operating",
+       "code"
+      ],
+      "body": "MinIO was abandoned as an open project in late 2025, so he swapped seven alternatives into a DuckDB + Iceberg REST Docker Compose stack:\n• S3Proxy was the easiest drop-in; SeaweedFS and Zenko CloudServer were also easy.\n• RustFS is still alpha and recently had a serious vulnerability.\n• Garage needs real config (newer versions add a single-node flag), Ozone wouldn't run on fewer than four nodes, and Ceph is too heavy.\nLater update: the pgsty/minio fork promises CVE patches. Compose files are in <a href=\"https://github.com/rmoff/minio-alternatives\">rmoff/minio-alternatives</a>. Relevant to local dev and CI stacks."
+     },
+     {
+      "title": "Claude Code isn't going to replace data engineers (yet)",
+      "url": "https://rmoff.net/2026/03/11/claude-code-isnt-going-to-replace-data-engineers-yet/",
+      "rt": false,
+      "alert": false,
+      "meta": "Robin Moffatt, Mar 2026, eval (not read in full)",
+      "tags": [
+       "ai-agents",
+       "culture"
+      ],
+      "body": "He had Claude Code build an idiomatic dbt + DuckDB project (staging → dim/fact) against his earlier hand-built pipeline. The answer was \"good, but not a replacement, yet.\" Companion post: <i>Evaluating Claude's dbt Skills: Building an Eval from Scratch</i> (13 Mar). A useful method for testing your own agent workflows."
+     },
+     {
+      "title": "Interesting links — September 2026",
+      "url": "https://rmoff.net/2026/09/29/interesting-links-september-2026/",
+      "rt": true,
+      "alert": false,
+      "meta": "Robin Moffatt, Sep 2026, newsletter (Kafka / Flink heavy edition)",
+      "tags": [
+       "streaming",
+       "cdc",
+       "operating"
+      ],
+      "body": "Leads for the next refresh:\n• Lorenzo Nicora's two-part watermarks deep dive.\n• Gustavo de Morais on custom CDC with <code>FROM_CHANGELOG</code> / <code>TO_CHANGELOG</code>, the Flink 2.3 changelog operators.\n• David Anderson on deduplicating streams and reviewing Flink SQL.\n• Why Lyft moved to the Flink Kubernetes Operator.\n• Tyler Akidau et al., <i>The Dataflow Model Revisited</i>.\n• DuckDB Labs joining AWS, with projects staying open source."
+     },
+     {
+      "title": "Interesting links — monthly series (May–Oct 2026)",
+      "url": "https://rmoff.net/2026/06/29/interesting-links-june-2026/",
+      "rt": false,
+      "alert": false,
+      "meta": "Robin Moffatt, 2026, newsletter",
+      "tags": [
+       "streaming",
+       "operating"
+      ],
+      "body": "A curated monthly roundup; June alone has 113 links. Picks:\n• May: Caesario Kisty's practical Medallion architecture on ClickHouse.\n• June: Strimzi mTLS and a Kroxylicious benchmark harness.\nWorth skimming each edition."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "Agentic Data",
+  "blurb": "Data agents, context layers and streaming agents on Flink. The theme across every serious write-up: the model is not the hard part; curated, owned, governed context is.",
+  "sections": [
+   {
+    "name": "Data agents & context layers",
+    "entries": [
+     {
+      "title": "How we built a personal data scientist for every Notion employee",
+      "url": "https://www.notion.com/blog/how-we-built-a-personal-data-scientist-for-every-notion-employee",
+      "rt": true,
+      "alert": false,
+      "meta": "Notion · David Thomas, Oct 2026, architecture",
+      "tags": [
+       "ai-agents",
+       "mcp",
+       "rbac",
+       "observability"
+      ],
+      "body": "Weekly requests to the data team fell about 80% in two months; about half of employees use it. Three pillars: governed access (every user signs in to Snowflake with their own identity, so answers reflect their grants), shared context (a Notion database indexing Skills, Metric Definitions, Table Schemas and FAQs, read page by page, not loaded whole) and clear instructions (resolve metric, population, period first; check join cardinality, denominators, incomplete periods; flag missing definitions instead of improvising). A <code>run_tagged_query</code> wrapper stamps each SQL with metric, definition and question metadata for tracing. Nightly review agent scans conversations, Slack, Notion and GitHub for stale or conflicting context; a triage agent applies small fixes and escalates the rest (\"evidence isn't approval\"). Spinoffs: Data Scout Reporter for scheduled reports, domain agents reusing its MCP. Takeaway: per-user identity, a definitions index, query tagging and a review loop."
+     },
+     {
+      "title": "How to build a data agent in Notion (help guide)",
+      "url": "https://www.notion.com/help/guides/how-to-build-a-data-agent-in-notion",
+      "rt": false,
+      "alert": false,
+      "meta": "Notion, Oct 2026, guide",
+      "tags": [
+       "ai-agents",
+       "mcp"
+      ],
+      "body": "The companion how-to: connection choices, example instructions, routing guidance, maintenance workflows and query logging examples. Notes that the wrapper is their internal implementation; the reusable parts are standard instructions, structured logging and metadata added at execution. Good source of instruction templates."
+     },
+     {
+      "title": "Inside OpenAI's in-house data agent",
+      "url": "https://openai.com/index/inside-our-in-house-data-agent/",
+      "rt": true,
+      "alert": false,
+      "meta": "OpenAI · Bonnie Xu, Aravind Suresh, Emma Tang, Jan 2026, architecture",
+      "tags": [
+       "ai-agents",
+       "mcp",
+       "observability"
+      ],
+      "body": "Over 70k datasets and 600 PB for 3.5k+ internal users, reachable from Slack, web, IDEs and MCP. Built on multiple layers of context (table usage metadata, human annotations, code level enrichment that reads the pipelines producing each table, institutional knowledge, memory, live queries). Memory alone took one test question from 22 minutes to about 1.5 minutes. The \"code enrichment\" idea maps well to reading Flink SQL and ClickHouse MV definitions to explain what a table really contains."
+     },
+     {
+      "title": "How OpenAI Built Its Data Agent",
+      "url": "https://blog.bytebytego.com/p/how-openai-built-its-data-agent",
+      "rt": false,
+      "alert": false,
+      "meta": "ByteByteGo · interview with Emma Tang, 2026, interview",
+      "tags": [
+       "ai-agents",
+       "culture"
+      ],
+      "body": "Why the agent is deliberately \"pretty vanilla\": one LLM, a context assembly layer, a curated tool set and a runtime. Strong data foundations do the work, not agent complexity. Good counterweight to over-engineering a data agent."
+     },
+     {
+      "title": "Introducing Genie One, Genie Agents, and Genie Ontology",
+      "url": "https://databricks.com/blog/introducing-genie-one-genie-ontology-and-genie-agents",
+      "rt": true,
+      "alert": false,
+      "meta": "Databricks, Jun 2026, launch",
+      "tags": [
+       "ai-agents",
+       "catalog",
+       "rbac"
+      ],
+      "body": "Genie Ontology automatically extracts knowledge from tables, queries, dashboards, pipelines and connected apps into a living graph, then weights each definition PageRank style by source, author authority, how often people rely on it, links to certified assets, and freshness, answering from the highest weighted sources and only from content the user may see. Self reported: 84.5% first attempt accuracy on a 28 question suite vs 52.4% for the strongest coding agent. Genie One also lives in Teams and Slack. The ranking idea is worth copying cheaply, e.g. prefer verified questions and curated segments over ad hoc tables."
+     },
+     {
+      "title": "Pushing the Frontier for Data Agents with Genie",
+      "url": "https://www.databricks.com/blog/pushing-frontier-data-agents-genie",
+      "rt": false,
+      "alert": false,
+      "meta": "Databricks AI Research, May 2026, research",
+      "tags": [
+       "ai-agents",
+       "indexing"
+      ],
+      "body": "Three techniques behind the accuracy jump: specialized knowledge search over a semantic index of tables, notebooks and dashboards; multiple LLMs with prompts tuned via GEPA; and parallel thinking. Reported internal accuracy rose from 32% (coding agent baseline) to over 90%."
+     },
+     {
+      "title": "Databricks Genie Ontology and the Semantic Layer Consolidation",
+      "url": "https://modak.com/blog/databricks-genie-ontology",
+      "rt": false,
+      "alert": false,
+      "meta": "Modak, Aug 2026, analysis",
+      "tags": [
+       "ai-agents",
+       "catalog"
+      ],
+      "body": "Sober take: Genie Ontology is a context layer, not a semantic layer; it is in gated preview; and context accuracy is not answer accuracy. The benchmark is 28 self graded questions. Read before quoting vendor numbers to leadership."
+     },
+     {
+      "title": "NVIDIA Auto Ontology",
+      "url": "https://github.com/NVIDIA/auto-ontology",
+      "rt": true,
+      "alert": false,
+      "meta": "NVIDIA · GitHub, Nov 2026, code (Apache 2.0)",
+      "tags": [
+       "ai-agents",
+       "mcp",
+       "catalog",
+       "code"
+      ],
+      "body": "An open library that builds the agent context layer from enterprise metadata: Discover (generate an ontology, link existing semantic models), Ground (attach trusted business meaning, reconcile definitions across systems), Expose (serve it to any agent via MCP, CLI or API), Learn (fold certified corrections back in). Stored in Postgres. The most directly reusable artifact on this list; check connector coverage for your stack before investing."
+     },
+     {
+      "title": "NVIDIA Releases Auto Ontology: An Open Semantic Layer That Grounds AI Agent SQL",
+      "url": "https://www.marktechpost.com/2026/11/01/nvidia-auto-ontology-open-source-semantic-layer-ai-agents/",
+      "rt": false,
+      "alert": false,
+      "meta": "MarkTechPost, Nov 2026, explainer",
+      "tags": [
+       "ai-agents",
+       "catalog"
+      ],
+      "body": "Walkthrough of the tools (e.g. a readiness check before querying), a comparison table against other semantic layers (listed sources: Databricks, Postgres, Snowflake, DuckDB), NVIDIA's claim of 90% faster ontology build, and the NeMo Gym evaluation comparing schema only vs ontology grounded agents."
+     },
+     {
+      "title": "NVIDIA Adds a Knowledge Layer to Its Agent Toolkit",
+      "url": "https://www.webpronews.com/nvidia-agent-toolkit-agent-knowledge-foundation-kumo-enterprise-data",
+      "rt": false,
+      "alert": false,
+      "meta": "WebProNews, Oct 2026, news",
+      "tags": [
+       "ai-agents"
+      ],
+      "body": "Context for Auto Ontology: NVIDIA Agent Knowledge Foundation, Kumo relational models, NVIDIA's own supply chain agents running through Palantir Foundry Ontology, and Databricks pairing Kumo Anomaly with Genie Ontology. The \"ontology\" vocabulary in one place."
+     },
+     {
+      "title": "DoorDash Gives 10,000 Employees an AI Data Analyst (Vera)",
+      "url": "https://www.pymnts.com/?p=4215913",
+      "rt": false,
+      "alert": false,
+      "meta": "PYMNTS coverage of DoorDash Engineering's \"Inside Vera\" post, Oct 2026, news (original post not opened)",
+      "tags": [
+       "ai-agents",
+       "observability"
+      ],
+      "body": "Pass rate on their 1,900 question eval rose from 43% to 90%, and they credit data organization over model choice. Same model head to head: Vera 73% vs an off the shelf coding agent 48%, which struggled to pick tables. Vera is blocked from unverified data; analysts now own the semantic layer and the eval set. Lesson: build a fixed eval set of real questions before adding features."
+     },
+     {
+      "title": "What Is a Context Layer for AI Agents? The Definitive Guide for 2026",
+      "url": "https://www.tellius.com/resources/blog/what-is-a-context-layer-for-ai-agents-the-definitive-guide-for-2026",
+      "rt": false,
+      "alert": false,
+      "meta": "Tellius, 2026, explainer (vendor)",
+      "tags": [
+       "ai-agents",
+       "mcp"
+      ],
+      "body": "Ties together OpenAI's six layers, Snowflake's agent context layer and a16z's \"superset of the semantic layer\": a context layer adds entity resolution, policy and governance enforcement at the agent boundary, and memory of past decisions. MCP is plumbing, not a substitute for governed context."
+     }
+    ]
+   },
+   {
+    "name": "Streaming agents · Flink Agents",
+    "entries": [
+     {
+      "title": "FLIP-531: Initiate Flink Agents as a new Sub-Project",
+      "url": "https://cwiki.apache.org/confluence/display/FLINK/FLIP-531%3A+Initiate+Flink+Agents+as+a+new+Sub-Project",
+      "rt": false,
+      "alert": false,
+      "meta": "Xintong Song, Sean Falconer, Chris Meyers · Flink wiki, May 2025, design doc",
+      "tags": [
+       "ai-agents",
+       "streaming"
+      ],
+      "body": "The founding proposal: minimal runtime infrastructure for long running, event driven agents built on existing Flink primitives, with Table and DataStream APIs as input and output."
+     },
+     {
+      "title": "Event-Driven AI Agents: Why Flink Agents Are the Future of Enterprise AI",
+      "url": "https://www.confluent.io/blog/event-driven-flink-agents-enterprise-ai/",
+      "rt": false,
+      "alert": false,
+      "meta": "Confluent, 2025, essay",
+      "tags": [
+       "ai-agents",
+       "streaming",
+       "mcp"
+      ],
+      "body": "Agents as event driven microservices: one runtime for data and agents, checkpointing for consistency across transformations and agent decisions, native MCP tool calls, dynamic topologies for ReAct style loops, and observability of decisions."
+     },
+     {
+      "title": "Alibaba Cloud, Ververica, Confluent, and LinkedIn Join Forces on Streaming AI Agents",
+      "url": "https://www.ververica.com/blog/alibaba-cloud-ververica-confluent-and-linkedin-join-forces-on-the-streaming-ai-agents-innovation-with-apache-flink",
+      "rt": false,
+      "alert": false,
+      "meta": "Ververica, 2025, launch",
+      "tags": [
+       "ai-agents",
+       "streaming"
+      ],
+      "body": "The Flink Forward Barcelona 2025 announcement; links Alibaba's deep dive and the Flink Forward Asia talk."
+     },
+     {
+      "title": "Apache Flink Agents 0.3.0 Release Announcement",
+      "url": "https://flink.apache.org/2026/06/19/apache-flink-agents-0.3.0-release-announcement/",
+      "rt": false,
+      "alert": false,
+      "meta": "Flink PMC · Wenjin Xie, Jun 2026, release",
+      "tags": [
+       "ai-agents",
+       "streaming"
+      ],
+      "body": "Mem0 backed long term memory, a declarative YAML API for agents in Python and Java, cross language actions, Fluss as action state store alongside Kafka, EventLog in the Web UI."
+     },
+     {
+      "title": "Orchestrating Autonomous AI Agents with Apache Kafka and Apache Flink",
+      "url": "https://speakerdeck.com/sandonjacobs/ato-2026-orchestrating-autonomous-ai-agents-with-apache-kafka-and-apache-flink",
+      "rt": true,
+      "alert": false,
+      "meta": "Sandon Jacobs (Confluent) · All Things Open 2026, slides + demo",
+      "tags": [
+       "ai-agents",
+       "streaming",
+       "code"
+      ],
+      "body": "Clearest mental model: a Flink agent is an event loop, not a call stack; LLMs as stateful operators in the DAG; durable memory survives restarts. Demo code linked from the deck. Start here for hands on."
+     },
+     {
+      "title": "Event-driven Agents with Complex Event Processing in Flink",
+      "url": "https://2026.berlinbuzzwords.de/session/event-driven-agents-with-complex-event-processing-in-flink/",
+      "rt": true,
+      "alert": false,
+      "meta": "Berlin Buzzwords, Jun 2026, talk",
+      "tags": [
+       "ai-agents",
+       "streaming",
+       "observability"
+      ],
+      "body": "Calling an LLM per event is costly and non deterministic, so filter first with Flink CEP and anomaly detection, then let a small model classify or act on the detected patterns. Exactly the shape for anomaly alerts on Kafka streams."
+     },
+     {
+      "title": "The Future of Data Streaming with Apache Flink for Agentic AI",
+      "url": "https://www.kai-waehner.de/blog/2025/08/18/the-future-of-data-streaming-with-apache-flink-for-agentic-ai/",
+      "rt": false,
+      "alert": false,
+      "meta": "Kai Waehner, Aug 2025, overview",
+      "tags": [
+       "ai-agents",
+       "streaming",
+       "mcp"
+      ],
+      "body": "Where Flink Agents sits next to MCP and A2A, with example use cases. Broad, vendor adjacent; read for orientation."
+     },
+     {
+      "title": "How to Build Streaming Agents to Power Intelligent Context-Aware Automation",
+      "url": "https://www.confluent.io/es-mx/resources/online-talk/how-to-build-streaming-agents/",
+      "rt": false,
+      "alert": false,
+      "meta": "Confluent · Sean Falconer & Brenner Heintz, 2026, online talk",
+      "tags": [
+       "ai-agents",
+       "streaming",
+       "mcp"
+      ],
+      "body": "Tutorial with Flink, Claude, MCP tool calling and vector search for agentic RAG. Confluent Cloud flavoured."
+     }
+    ]
+   }
+  ]
+ }
+]
