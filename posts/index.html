@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Writing · Muhammad Waqas Dilawar</title>
+  <meta name="description" content="Notes on real-time data platforms: Flink, Kafka, ClickHouse and Iceberg.">
+  <link rel="canonical" href="https://waqasdilawar.github.io/posts/">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://waqasdilawar.github.io/posts/">
+  <meta property="og:title" content="Writing · Muhammad Waqas Dilawar">
+  <meta property="og:description" content="Notes on real-time data platforms: Flink, Kafka, ClickHouse and Iceberg.">
+  <meta property="og:image" content="https://waqasdilawar.github.io/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root { --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --accent: #0b57d0; --line: #e4e4e4; --code: #f0f0f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111; --fg: #eee; --muted: #999; --accent: #8ab4f8; --line: #2a2a2a; --code: #1c1c1c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 8vh 16px 48px; }
+    a { color: var(--accent); text-decoration: none; text-underline-offset: 4px; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+    .back { font-size: .9rem; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: .75rem 0 .5rem; }
+    .date { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+    article h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+    article h3 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+    article p, article ul, article ol { margin: 0 0 1.1rem; }
+    code { font: .88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+    pre { background: var(--code); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+    pre code { background: none; padding: 0; font-size: .82rem; overflow-wrap: normal; }
+    .table { overflow-x: auto; margin: 0 0 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+    th { font-weight: 600; }
+    .diagram { margin: 1.5rem 0; overflow-x: auto; text-align: center; }
+    .diagram svg { max-width: 100%; height: auto; }
+    @media (max-width: 560px) { .diagram svg { max-width: none !important; width: 640px; } }
+    .diagram .dark { display: none; }
+    @media (prefers-color-scheme: dark) { .diagram .light { display: none; } .diagram .dark { display: block; } }
+    .posts { list-style: none; padding: 0; margin: 0; }
+    .posts li { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .posts .t { font-weight: 600; font-size: 1.05rem; }
+    .posts .d, .lede { color: var(--muted); }
+    .posts .d { font-size: .85rem; }
+    .posts p { margin: .25rem 0 0; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="../">← Muhammad Waqas Dilawar</a>
+    <h1>Writing</h1>
+    <p class="lede">Notes from building real-time data platforms with Flink, Kafka, ClickHouse and Iceberg.</p>
+    <ul class="posts">
+      <li><a class="t" href="one-privilege-clickhouse-iceberg/">One Privilege Makes ClickHouse Read Your Iceberg Lakehouse</a><div class="d"><time datetime="2026-06-25">25 June 2026</time></div><p>Why one Polaris grant, TABLE_READ_DATA, decides whether ClickHouse can read your Iceberg lakehouse, and the credential-vending 400 that bites right after.</p></li>
+    </ul>
+    <footer>© 2026 <a href="../">Muhammad Waqas Dilawar</a></footer>
+  </div>
+</body>
+</html>
