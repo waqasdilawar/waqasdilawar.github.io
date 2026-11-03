@@ -1,5 +1,0 @@
-# Private: the list of employer / internal terms the privacy check looks for.
-tools/private-terms.local.txt
-# Raw Notion exports: unreviewed, may contain private notes.
-notion-export/
-__pycache__/
