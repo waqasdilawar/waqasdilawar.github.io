@@ -76,6 +76,7 @@
       <li><a href="posts/positional-sink-schema-evolution/">Why adding a column is a planned stop: schema evolution on a positional Flink → ClickHouse sink</a> — drained NATIVE savepoint, ALTER every node, renamed sink UID, and the signals that lie.</li>
       <li><a href="posts/iceberg-snapshot-expiry-it-stops/">Iceberg doesn't slow down when you skip snapshot expiry. It stops.</a> — a committer heap OOM that meant "you never expired snapshots", and the maintenance job that crashed the catalog first.</li>
       <li><a href="posts/lakehouse-distance/">The distance between my lakehouse and the real one</a> — what broke when a local Flink job first read real bronze, and a 12.5 MiB cap that looked like a flaky network.</li>
+      <li><a href="posts/backfill-safe-to-swap/">How to know a backfill is safe to swap before you swap it</a> — two reconciliations, a pad sized to the latency tail, and a gate that caught a regression on sample one.</li>
     </ul>
 
     <h2>Reading list</h2>
