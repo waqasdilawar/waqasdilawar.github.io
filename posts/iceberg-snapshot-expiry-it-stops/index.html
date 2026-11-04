@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iceberg doesn&#x27;t slow down when you skip snapshot expiry. It stops. · Muhammad Waqas Dilawar</title>
+  <meta name="description" content="A Flink committer restarting every few hours on a heap OOM that meant &#x27;you never expired snapshots&#x27;, and the maintenance job that crashed the catalog first.">
+  <link rel="canonical" href="https://waqasdilawar.github.io/posts/iceberg-snapshot-expiry-it-stops/">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://waqasdilawar.github.io/posts/iceberg-snapshot-expiry-it-stops/">
+  <meta property="og:title" content="Iceberg doesn&#x27;t slow down when you skip snapshot expiry. It stops. · Muhammad Waqas Dilawar">
+  <meta property="og:description" content="A Flink committer restarting every few hours on a heap OOM that meant &#x27;you never expired snapshots&#x27;, and the maintenance job that crashed the catalog first.">
+  <meta property="og:image" content="https://waqasdilawar.github.io/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root { --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --accent: #0b57d0; --line: #e4e4e4; --code: #f0f0f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111; --fg: #eee; --muted: #999; --accent: #8ab4f8; --line: #2a2a2a; --code: #1c1c1c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 8vh 16px 48px; }
+    a { color: var(--accent); text-decoration: none; text-underline-offset: 4px; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+    .back { font-size: .9rem; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: .75rem 0 .5rem; }
+    .date { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+    article h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+    article h3 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+    article p, article ul, article ol { margin: 0 0 1.1rem; }
+    code { font: .88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+    pre { background: var(--code); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+    pre code { background: none; padding: 0; font-size: .82rem; overflow-wrap: normal; }
+    .table { overflow-x: auto; margin: 0 0 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+    th { font-weight: 600; }
+    .video { margin: 0 0 2rem; }
+    .video video { width: 100%; height: auto; border-radius: 8px; background: #000; display: block; }
+    .video figcaption { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+    .diagram { margin: 1.5rem 0; overflow-x: auto; text-align: center; }
+    .diagram svg { max-width: 100%; height: auto; }
+    @media (max-width: 560px) { .diagram.wide svg { max-width: none !important; width: 640px; } }
+    .diagram .dark { display: none; }
+    @media (prefers-color-scheme: dark) { .diagram .light { display: none; } .diagram .dark { display: block; } }
+    .posts { list-style: none; padding: 0; margin: 0; }
+    .posts li { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .posts .t { font-weight: 600; font-size: 1.05rem; }
+    .posts .d, .lede { color: var(--muted); }
+    .posts .d { font-size: .85rem; }
+    .posts p { margin: .25rem 0 0; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="../">← All posts</a>
+    <h1>Iceberg doesn&#x27;t slow down when you skip snapshot expiry. It stops.</h1>
+    <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
+    <article>
+<p><em>A production Flink job that restarted every few hours, a stack trace that said "out of memory" and meant "you forgot to take out the trash," and a maintenance job that made things worse before it made them better.</em></p>
+<p>Quick context. A Flink streaming job commits to Iceberg tables behind a Polaris REST catalog, on OCI Object Storage. Every commit adds a snapshot to the table's metadata, and nothing removes it until you run snapshot expiry.</p>
+<p>I want to write this one down because the failure looked like one thing and was another, and because I have now watched the same mechanism bite from two directions in the same week. Iceberg is a table format that gives you atomic commits, time travel, and engine independence. What it does not give you is garbage collection. You own that. Skip it long enough and the bill does not arrive as slowness. It arrives as a writer that cannot commit at all.</p>
+<h2>The restarts</h2>
+<p>Our production correlation job — Flink 2.2, RocksDB, writing to both ClickHouse and an Iceberg silver layer behind a Polaris REST catalog — had restarted <strong>sixteen times in forty-four hours</strong>. Forty-eight failed checkpoints out of about 2,600. Nobody had been paged. The job self-heals: it dies, restarts from the last checkpoint, replays, catches up. From the outside it looked like a slightly bumpy pipeline. Reporting freshness took a hit every few hours and then recovered. Nothing was lost.</p>
+<p>That is exactly why it ran for two days before anyone looked closely.</p>
+<p>When I finally pulled the exception history, ten of the fifteen recorded failures (the history is capped) were the same stack trace, byte for byte:</p>
+<pre><code class="language-text">java.lang.OutOfMemoryError: Java heap space
+  at org.apache.hc.core5.util.CharArrayBuffer.expand
+  at org.apache.hc.core5.http.io.entity.EntityUtils.toString
+  at org.apache.iceberg.rest.HTTPClient.extractResponseBodyAsString
+  at org.apache.iceberg.rest.RESTTableOperations.refresh
+  at org.apache.iceberg.SnapshotProducer.refresh
+  at org.apache.iceberg.SnapshotProducer.commit
+  at org.apache.iceberg.flink.sink.dynamic.DynamicCommitter.commit
+</code></pre>
+<p>It hit the main sink committer and the dead-letter sink committer. It hit four different TaskManagers. So it was not a bad node and it was not one table. It followed the workload.</p>
+<h2>What the trace is actually saying</h2>
+<p>Read it bottom-up. The Flink committer is committing a snapshot. To do that, Iceberg first refreshes its view of the table — it asks the catalog for the current table metadata. Over REST, that means an HTTP GET whose body is the <strong>entire metadata JSON document</strong>, read into memory as a single string.</p>
+<p>That document is the table. It holds the schema, the partition spec, the properties, and — this is the part that matters — the full list of every snapshot the table has taken since the last time somebody expired them. A streaming job that checkpoints every minute adds well over a thousand snapshots a day. None of them go away on their own.</p>
+<p>The thing that bounds this document is snapshot expiry, not compaction. Compaction alone makes it worse, because every rewrite is one more snapshot. (Newer clients can ask for <code>snapshots=refs</code> and get a smaller response. That trims what you fetch, not what the table holds.)</p>
+<p>Our snapshot expiry was about <strong>twenty-four days behind</strong>. The silver tables had never been compacted or expired at all. So the metadata document had been growing linearly for weeks, and the committer's heap — sized sensibly for the work a committer does — eventually could not hold a string that large. <code>CharArrayBuffer.expand</code> asked for more, there was no more, the task died.</p>
+<p>Then Flink restarted the job, it caught up, it committed again — and the metadata was now one snapshot bigger. Which is why the restarts were getting closer together.</p>
+<h3>What the growth looks like</h3>
+<p>To put a shape on it, I reproduced the growth in a small lab (November 2026): Polaris 1.6.0 with MinIO, PyIceberg 0.12, a two-column table, one single-row append per commit, and the size of the <code>loadTable</code> response body after each batch of commits:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>commits</th>
+<th>loadTable response</th>
+<th>snapshots in the metadata</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>1.7 KB</td>
+<td>1</td>
+</tr>
+<tr>
+<td>100</td>
+<td>75 KB</td>
+<td>100</td>
+</tr>
+<tr>
+<td>250</td>
+<td>165 KB</td>
+<td>250</td>
+</tr>
+<tr>
+<td>500</td>
+<td>314 KB</td>
+<td>500</td>
+</tr>
+<tr>
+<td>after expiring all but the current snapshot</td>
+<td>17 KB</td>
+<td>1</td>
+</tr>
+</tbody>
+</table></div>
+<p>About 620 bytes per commit, linear, for a table with almost nothing in it. (After expiry the document is still ten times its day-one size: what remains is the log of previous metadata files, which Iceberg caps at 100 entries by default, so that part stops growing on its own.) At one commit a minute that is at least 0.9 MB a day per table — on paper, about 21 MB after twenty-four days — and the committer reads all of it on every commit. Commits also got slower as it grew, from about 0.08 s each at 50 commits to 0.2 s at 500 — a slowdown nobody notices at one commit a minute, which is the point. The lab shows the growth and the shrink; it doesn't reproduce the OOM, and I didn't measure the production document.</p>
+<h2>The trap I nearly walked into</h2>
+<p>The stack trace says out of memory. The obvious lever is more memory. Bump the TaskManager heap, or at least the committer slot, and the restarts stop.</p>
+<p>They would stop — for a few weeks. The document keeps growing. You have bought time and fixed nothing, and the next time it fails the heap is bigger and so is the blast radius.</p>
+<p>There is a second, subtler trap here too, and I want to name it because we had <em>another</em> memory problem on a sibling job the same month. That one was a cgroup kill: exit code 137, <code>OOMKilled</code> in the pod status, visible only in the JobManager log. The fix for that class is container limits, <code>MALLOC_ARENA_MAX</code>, off-heap tuning. This one is an in-JVM heap OOM with a named allocation site. Same word, different disease, different medicine. If you reach for the pod-limit lever on a heap OOM you will be confused for a long time.</p>
+<p>The real fix is boring: run snapshot expiry, bring retention down to something deliberate, and keep it running on a schedule so the document stays bounded. Which is what we set out to do.</p>
+<h2>The maintenance job that made it worse first</h2>
+<p>We already had an Iceberg maintenance job for the bronze tables — a Flink job using the built-in table maintenance operators to bin-pack small files and expire snapshots. Six tables, healthy, had been running for weeks. So the plan was straightforward: stand up a second instance pointed at the silver namespace.</p>
+<p>The first thing that happened was that it did nothing at all, while reporting <code>RUNNING</code>.</p>
+<p>All 224 tasks sat in <code>scheduled</code>. Zero TaskManagers registered. The exceptions endpoint was empty. From every dashboard we had, the job was healthy and idle. The only place the truth appeared was the JobManager log: 41 TaskManager pods created, 40 terminated with exit code 1 about six seconds after birth, before they could register. The values file had been copied from the bronze job and had lost the volume mount for a local working directory while keeping the config that pointed at it. The container runs as a non-root user; it could not create the directory at the image root; it exited. Ten-minute fix once found. But I want to underline that a maintenance job can be completely dead and look fine, and if your alerting is on job state rather than tasks-actually-running you will not know.</p>
+<p>The second thing that happened was the interesting one. With the volume fixed, the job deployed — and within thirty minutes <strong>Polaris was in <code>CrashLoopBackOff</code></strong>.</p>
+<p>The silver namespace resolved to fourteen tables. The maintenance job builds a small pipeline per table, so that came to roughly 154 operators across 224 tasks. Every one of those operators, on open, calls <code>loadTable</code> against the catalog. And every one of those fourteen tables had never been maintained, so every one of their metadata documents was the same kind of bloated thing that had just been killing my committer.</p>
+<p>Polaris was a single replica with a 6 GiB memory cap. Its working set sawtoothed from 1.6 GiB up to 5.97 GiB, and it got killed two different ways. First by the liveness probe — the GC pauses under that much allocation stalled the health endpoint past the probe's patience, and Kubernetes sent SIGTERM then SIGKILL, which showed up in the pod status as exit 137 with reason <code>Error</code>. Then, a little later, by a genuine cgroup OOM. I initially called all of it "OOMKilled" and had to correct myself, because the two need different fixes: the probe needs to be more patient, <em>and</em> the pod needs more room.</p>
+<p>Meanwhile the maintenance job retried every ninety seconds, and every retry fired another 154 <code>loadTable</code> calls at a catalog that was still getting back on its feet. A tidy feedback loop. The bronze maintenance job, pointed at its six well-kept tables, ran through the whole thing without a blip.</p>
+<p>The moment we stopped the silver job, Polaris stopped crashing on its own. Which was the confirmation I needed: the maintenance job intended to shrink the metadata had knocked over the catalog by <em>reading</em> the metadata it was about to shrink. The first pass over a never-maintained table is by far the most expensive one. Steady-state maintenance on a well-kept table is cheap. The debt compounds, and the interest is paid on the first repayment.</p>
+<h2>The scare that turned out fine</h2>
+<p>There is a sub-plot I had been carrying for weeks. Our object storage is OCI's S3-compatible endpoint. I had a long-standing suspicion — from an earlier incident — that it was rejecting the bulk delete requests Iceberg issues during snapshot expiry, over a checksum header the AWS SDK adds. If that were true, expiry would have been removing references from the metadata while leaving every file on disk. A smaller metadata document, the same storage bill, and orphan files forever.</p>
+<p>I had written "fix the delete path" into the plan as a hard precondition. Before acting on it I checked. I pulled about nine hours of the bronze maintenance job's TaskManager log — 684,000 lines — and grepped for every failure signature I knew: <code>Failed to delete object</code>, <code>Deleted only 0 of N files</code>, <code>InvalidRequestException</code>. Zero, zero, zero. Then I reconciled what expiry had scheduled against what the two delete subtasks reported: 265 scheduled, 133 + 132 deleted. 113 scheduled, 57 + 56. Every table, exactly.</p>
+<p>The two JVM flags we had set some time ago — <code>-Daws.requestChecksumCalculation=when_required</code> and <code>-Daws.s3.disableChunkedEncoding=true</code> — were the fix, not the bug; at least nothing in nine hours of logs says otherwise. I had been carrying a belief that was no longer true and nearly spent a day on it.</p>
+<p>One honest caveat: proving that the delete <em>calls</em> succeed is not the same as proving that the <em>storage footprint</em> dropped. That is a separate measurement and it is still on my list.</p>
+<h2>Where it stands</h2>
+<p>Polaris first: memory cap from 6 to 12 GiB. There is no explicit <code>-Xmx</code> in the deployment, and the base image sizes the heap as a percentage of the container limit, so this lever actually works. Liveness probe relaxed so a long GC pause is not a death sentence.</p>
+<p>Then the silver maintenance job, in batches. Not <code>silver.*</code> — an explicit list of the three smallest tables, then the next few, six batches in all, with the biggest table alone in the last one. Promote a batch only after the previous one has completed a full compaction-and-expiry cycle with the catalog stable.</p>
+<p>The catalog is a single replica with autoscaling off, and every Iceberg writer in the platform depends on it. Resizing is the stopgap. Making it not a single point of failure is the fix.</p>
+<h2>What I am taking away</h2>
+<ul>
+<li><strong>Iceberg metadata grows on every commit and never shrinks on its own.</strong> Snapshot expiry is not hygiene. It is part of the write path. Schedule it before the first streaming writer goes live, not after the first outage.</li>
+<li><strong>Alert on snapshot count and metadata file size per table.</strong> Those are the leading indicators. Committer heap usage is the lagging one, and by the time it fires you are already restarting.</li>
+<li><strong>Do not fix a heap OOM with more heap.</strong> Read the allocation site. If it is a metadata read, the metadata is the problem.</li>
+<li><strong>"OOM" is two diseases.</strong> In-JVM heap exhaustion and cgroup OOMKilled have different signatures and different fixes. Check which one you have before you touch anything.</li>
+<li><strong>The catalog reads the same bloated documents your writers do.</strong> Size it for the burst of a full maintenance sweep, not the steady state, and do not run it as a single replica.</li>
+<li><strong>Never do a first pass on <code>*</code>.</strong> Smallest tables first, one batch at a time, biggest table alone at the end.</li>
+<li><strong>A maintenance job can be dead while reporting healthy.</strong> Alert on tasks running and last successful cycle, not on job state.</li>
+<li><strong>Verify your beliefs about the object store.</strong> "Expiry runs" and "storage is reclaimed" are two claims. I had the wrong answer to the second one for weeks. Reconcile scheduled deletes against completed ones, and then go check the bucket.</li>
+</ul>
+<p>The pipeline self-healed every single time, and no data was lost. I keep coming back to that, because it is the reason this was easy to ignore for two days — and the reason the metadata kept growing while we ignored it.</p>
+    </article>
+    <footer>© 2026 <a href="../../">Muhammad Waqas Dilawar</a></footer>
+  </div>
+</body>
+</html>
