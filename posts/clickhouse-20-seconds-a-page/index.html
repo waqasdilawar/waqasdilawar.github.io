@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>20 seconds a page: where ClickHouse was really spending the time · Muhammad Waqas Dilawar</title>
+  <meta name="description" content="A paged API took 20 s on ClickHouse. The query log, EXPLAIN and a few controlled comparisons found a different cause on every screen: text, FINAL, shape.">
+  <link rel="canonical" href="https://waqasdilawar.github.io/posts/clickhouse-20-seconds-a-page/">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://waqasdilawar.github.io/posts/clickhouse-20-seconds-a-page/">
+  <meta property="og:title" content="20 seconds a page: where ClickHouse was really spending the time · Muhammad Waqas Dilawar">
+  <meta property="og:description" content="A paged API took 20 s on ClickHouse. The query log, EXPLAIN and a few controlled comparisons found a different cause on every screen: text, FINAL, shape.">
+  <meta property="og:image" content="https://waqasdilawar.github.io/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root { --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --accent: #0b57d0; --line: #e4e4e4; --code: #f0f0f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111; --fg: #eee; --muted: #999; --accent: #8ab4f8; --line: #2a2a2a; --code: #1c1c1c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 8vh 16px 48px; }
+    a { color: var(--accent); text-decoration: none; text-underline-offset: 4px; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+    .back { font-size: .9rem; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: .75rem 0 .5rem; }
+    .date { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+    article h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+    article h3 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+    article p, article ul, article ol { margin: 0 0 1.1rem; }
+    code { font: .88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+    pre { background: var(--code); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+    pre code { background: none; padding: 0; font-size: .82rem; overflow-wrap: normal; }
+    .table { overflow-x: auto; margin: 0 0 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+    th { font-weight: 600; }
+    .video { margin: 0 0 2rem; }
+    .video video { width: 100%; height: auto; border-radius: 8px; background: #000; display: block; }
+    .video figcaption { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+    .diagram { margin: 1.5rem 0; overflow-x: auto; text-align: center; }
+    .diagram svg { max-width: 100%; height: auto; }
+    @media (max-width: 560px) { .diagram.wide svg { max-width: none !important; width: 640px; } }
+    .diagram .dark { display: none; }
+    @media (prefers-color-scheme: dark) { .diagram .light { display: none; } .diagram .dark { display: block; } }
+    .posts { list-style: none; padding: 0; margin: 0; }
+    .posts li { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .posts .t { font-weight: 600; font-size: 1.05rem; }
+    .posts .d, .lede { color: var(--muted); }
+    .posts .d { font-size: .85rem; }
+    .posts p { margin: .25rem 0 0; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="../">← All posts</a>
+    <h1>20 seconds a page: where ClickHouse was really spending the time</h1>
+    <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
+    <article>
+<p>Quick context. We moved a customer-facing analytics API from a legacy batch warehouse to ClickHouse. It serves dashboards, a paged list of records, and a detail view, and it reads tables that keep one row per version of a record (<code>ReplacingMergeTree</code> by <code>updated_at</code>), folded to the latest version at read time. Day partitions on event time; the sorting key is account and record id, <strong>not time</strong>.</p>
+<p>The numbers matched on day one — within 0.3% of the old warehouse on a day for the largest clients. The speed did not. One page of the list for the largest client took about 20 seconds, whatever the window, the page number or the API version; the old warehouse took 1 to 6. Under load, a page of 15 rows used 25 to 35 GB of memory.</p>
+<p>The fixes are easy to list. The method is what I would reuse: the cause was different on every screen, and two of them were not where we first looked.</p>
+<h2>The short version</h2>
+<ul>
+<li><strong>Measure the statement, not the response.</strong> <code>system.query_log</code> gives duration, rows read, bytes and memory per statement — but only for the node you are connected to. Use <code>clusterAllReplicas</code>, and tag every statement with <code>log_comment</code> so you know which screen it came from.</li>
+<li><strong>If a small client costs the same as a large one, the cost is not the data.</strong> In our case it was the statement text.</li>
+<li><strong>Compare what a statement reads with what it returns.</strong> A page that reads the whole day several times has a shape problem, not a data problem.</li>
+<li><strong>Let <code>EXPLAIN indexes = 1</code> tell you how many parts were opened.</strong> <code>FINAL</code> was opening every partition.</li>
+</ul>
+<h2>Three questions that found everything</h2>
+<ol>
+<li><strong>Does a small client cost the same as a large one?</strong> Run the same screen for a client with a hundred records a day and one with a million. If both pay the same, the time is not in the data.</li>
+<li><strong>How much does the statement read compared with what it returns?</strong> <code>read_rows</code> against the client's real row count for the window. Then run day, week, month, page 1 and page 21. Does the read grow with the window, the page, or neither?</li>
+<li><strong>How many parts and partitions are opened?</strong> <code>EXPLAIN indexes = 1</code>, with and without a bound on the partition.</li>
+</ol>
+<p>Every case below came out of one of those three.</p>
+<h2>Case 1: the statement text was the cost</h2>
+<p>One page for a medium client took 13.6 s. A client with about a hundred records a day paid the same 13 s as one with a million. That was the giveaway.</p>
+<p>The page view was about 33,000 characters. It chose the time slice inside the SQL, with a sub-select that the rest of the view referenced eight times, and ClickHouse analysed it again each time — a non-<code>MATERIALIZED</code> sub-select or CTE is inlined at every reference, so it is analysed and run eight times, not once (newer versions have <code>MATERIALIZED</code> CTEs behind <code>enable_materialized_cte</code> if you can't move the decision out). To choose the slice, it also folded the client's whole last day just to count whether the last hour could fill a page. Most of the 13.6 s went to analysing the statement; reading the data took about half a second.</p>
+<p>The fix was to stop making ClickHouse decide. The application computes the slice with plain arithmetic — the hour next to the cursor, or the last real hour of the window — and passes it as literal values. Two statements run in parallel: the total comes from an hourly rollup (0.03 s), and the page folds only that one hour (1.7 s for the largest client). If the hour cannot fill the page, the request falls back to the wide path. In shape (not the real queries): statement A is <code>count()</code> from the hourly rollup for the window; statement B is the page from that one hour, <code>FINAL</code> bounded to that hour's partition.</p>
+<p>Every client on that path went from 13–19 s a page to 1.5–2.8 s. The largest client's two months went from 22.8 s to 3.1 s, reading a third of the rows with a sixth of the memory. And the answer did not change: 252 of 254 requests were identical row by row against the old path; the other two were invalid inputs that now return 400 instead of 500.</p>
+<h2>Case 2: FINAL opened every partition</h2>
+<p>Here's the part that surprised me. With <code>FINAL</code> and a time range, <code>EXPLAIN</code> showed one table opening <strong>150 of 150 parts</strong>. With a condition on the partition id, it opened 19. Another screen opened 233 of 233, against 34.</p>
+<p>I reproduced it on ClickHouse 26.4.2.10 with the same layout — <code>ReplacingMergeTree(updated_at)</code>, <code>PARTITION BY toDate(event_time)</code>, <code>ORDER BY (account, record_id)</code>, 30 day partitions, merges stopped — and one day's window for one account:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>query</th>
+<th>parts opened</th>
+<th>granules after primary key</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no <code>FINAL</code>, time range</td>
+<td>1 / 30</td>
+<td>1 / 12</td>
+</tr>
+<tr>
+<td><code>FINAL</code>, time range</td>
+<td>30 / 30</td>
+<td>30 / 360</td>
+</tr>
+<tr>
+<td><code>FINAL</code>, time range + <code>_partition_id</code> bound</td>
+<td>1 / 1 (the bound selects the part before the index runs)</td>
+<td>1 / 12</td>
+</tr>
+</tbody>
+</table></div>
+<pre><code class="language-sql">SELECT ... FROM t FINAL
+WHERE account = 7 AND event_time &gt;= '2026-06-10' AND event_time &lt; '2026-06-11'
+  AND _partition_id IN ('20260610')   -- pad by the days a late version can arrive
+</code></pre>
+<p>This is not a bug in your query. When the partition key columns are not covered by the sorting key, a newer version of a row can sit in another partition, and pruning before <code>FINAL</code> could skip the row that should win. ClickHouse 26.3 fixed that by not pruning partitions under <code>FINAL</code> for this layout; 26.5 added <code>defer_partition_pruning_after_final</code> (set it to 0 to get pruning back, with the same risk). Our test container ran 24.8, which still pruned, so the tests were fast and production was not. The integration tests now run on the production version.</p>
+<p>The fix was to bound <code>FINAL</code> ourselves with a padded <code>_partition_id</code> range: versions of a record arrive within a known number of days, so padding the window by that much keeps every candidate winner in range. One dashboard went from 6.55 s to 1.72 s and from 1.31 GB to 0.10 GB of memory. One table went from 22.4 s and 73 M rows to 0.95 s and 10 M rows.</p>
+<p>The alternative we rejected was <code>do_not_merge_across_partitions_select_final = 1</code>. It was faster still, and it counted 2% of records twice — the ones whose versions sat on two days.</p>
+<h2>Case 3: a page read the whole day several times</h2>
+<p>The other list took about 20 s a page for the largest client, whatever the window or page number. A newer cursor API gave the same time. The query log said the client had 4.4 M rows that day, and the page read 20.3 M rows, 2.3 GB and 5.2 GB of memory. The total was not the problem: it came from the rollup in 18 ms.</p>
+<p>Time is not in the sorting key. Inside a day, an account's rows are ordered by record id, so the rows of one hour are spread over the whole day. Every page read the day, and read it several times. A cursor only chooses which 15 rows come back after the same scan, so page 21 cost the same as page 1.</p>
+<p>The test that showed the way out: on production, counting the client's rows for the day took 1.1 s, and folding only the status per record and taking the newest 15 keys took 1.8 s. The scan itself was cheap; the shape of the read was not.</p>
+<p>So: keys first, from narrow columns, then the wide columns for those 15 keys, plus the same hour-first slicing as Case 1. One client's month went from 35 s on the old warehouse and 9.3 s on ClickHouse to 2.1 s; another's from 46 s and 9.7 s to 2.1 s.</p>
+<h2>Case 4: one OR branch outside the key</h2>
+<p>Opening one record took 1.2 to 1.7 s inside ClickHouse. The statement found the row two ways — by record id, or by an external id — joined with <code>OR</code>. The external id is not in the sorting key, and one branch the index cannot use makes the whole <code>OR</code> unusable for the index, so ClickHouse read the account's whole window. In the lab (26.4.2.10, 3 M rows, one account of 1.5 M):</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>condition</th>
+<th>rows read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>account = a AND record_id = r</code></td>
+<td>8,192</td>
+</tr>
+<tr>
+<td><code>account = a AND (record_id = r OR ext_id = x)</code></td>
+<td>1,500,864</td>
+</tr>
+<tr>
+<td><code>account = a AND record_id IN (r, r_of_x)</code></td>
+<td>16,384</td>
+</tr>
+<tr>
+<td><code>account = a AND (record_id = r OR record_id = r2)</code></td>
+<td>16,384</td>
+</tr>
+</tbody>
+</table></div>
+<p>The <code>OR</code> itself is fine when both branches are in the key. The fix was two small lookups for the keys, then one <code>IN (ids)</code>: 0.45 s inside ClickHouse, and 38 of 38 details identical to the old path.</p>
+<h2>The decoder</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>symptom</th>
+<th>cause</th>
+<th>fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A small client is as slow as a large one</td>
+<td>Statement analysis, not data (a sub-select referenced many times)</td>
+<td>Decide in the application; pass literals</td>
+</tr>
+<tr>
+<td>A page reads many times its client's rows</td>
+<td>Time not in the sorting key; every page scans the day</td>
+<td>Keys first from narrow columns, then wide columns for those keys; slice by the hour the page needs</td>
+</tr>
+<tr>
+<td><code>FINAL</code> + time range opens every partition</td>
+<td>Partition key not in the sorting key (26.3+ stops pruning under <code>FINAL</code>)</td>
+<td>Bound <code>FINAL</code> with a padded <code>_partition_id</code> range; prove it with <code>EXPLAIN</code></td>
+</tr>
+<tr>
+<td>One lookup reads the account's whole window</td>
+<td><code>OR</code> with a branch outside the sorting key</td>
+<td>Look up the keys, then one <code>IN (ids)</code></td>
+</tr>
+<tr>
+<td>Statements keep running after the client gave up</td>
+<td>No limits on the API's user; over HTTP, <code>cancel_http_readonly_queries_on_client_close</code> is off by default on self-managed ClickHouse (Cloud turns it on)</td>
+<td>A settings profile for the API user (<code>max_execution_time</code>, <code>max_memory_usage</code>, <code>max_concurrent_queries_for_user</code>) and that setting on</td>
+</tr>
+</tbody>
+</table></div>
+<p>Under load, one test left 46 statements running after their clients had gone, the longest for over 18 minutes. That last row is the one I would set up first next time.</p>
+<p>Nothing here needed new hardware. Every fix came from a measurement, and every fix was checked row by row against the old path before it shipped. Speed without parity is not a fix. For point lookups by a high-cardinality id, the bloom skip index from <a href="../finding-one-row-fast/">Finding one row fast</a> is the other half.</p>
+<p>The production numbers above are ours, observed on ClickHouse 26.3. The <code>FINAL</code> and <code>OR</code> tables were reproduced on ClickHouse 26.4.2.10; the statement-analysis cost was not (a small lab only showed the direction).</p>
+<h2>Where this comes from</h2>
+<ul>
+<li>ClickHouse 26.3 changelog, <a href="https://github.com/ClickHouse/ClickHouse/pull/98242">PR #98242</a>: partition pruning is no longer applied under <code>FINAL</code> when the partition key columns are not covered by the sorting key.</li>
+<li>ClickHouse 26.5 changelog, <a href="https://github.com/ClickHouse/ClickHouse/pull/104705">PR #104705</a>: <code>defer_partition_pruning_after_final</code>.</li>
+</ul>
+    </article>
+    <footer>© 2026 <a href="../../">Muhammad Waqas Dilawar</a></footer>
+  </div>
+</body>
+</html>
