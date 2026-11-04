@@ -62,11 +62,11 @@
     <h1>Why adding a column is a planned stop: schema evolution on a positional Flink → ClickHouse sink</h1>
     <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
     <article>
-<p>Quick context. A stateful Flink job (RocksDB, savepoints, run by the Flink Kubernetes Operator) writes to ClickHouse through our own async sink that sends positional RowBinary. NATIVE savepoints and <code>formatType</code> need Flink 1.15 or later; the exact versions here are ours, not a requirement. Adding a column to that table is not an <code>ALTER</code> and a redeploy; it is a planned stop.</p>
-<p>The first time we got this wrong, the job looked fine. It showed RUNNING between crashes, dashboards looked alive, and nothing landed. The second time, a savepoint in the wrong format took a TaskManager down halfway through. This is the procedure we ended up with, and why each step is there.</p>
+<p>A stateful Flink job (RocksDB, savepoints, run by the Flink Kubernetes Operator) writes to ClickHouse through our own async sink that sends positional RowBinary. NATIVE savepoints and <code>formatType</code> need Flink 1.15 or later; the exact versions here are ours, not a requirement. Adding a column to that table is not an <code>ALTER</code> and a redeploy; it is a planned stop.</p>
+<p>Get it wrong and the job looks fine: it shows RUNNING between crashes, dashboards look alive, and nothing lands. Take the savepoint in the wrong format and a TaskManager can drop out halfway through. This is the procedure we ended up with, and why each step is there.</p>
 <h2>The core constraint</h2>
 <p>The Flink job writes to ClickHouse using <strong>positional RowBinary</strong>: rows are serialised as raw bytes in table-column order with no column names attached. ClickHouse decodes them by assuming the byte layout matches its current column list exactly.</p>
-<p>This makes writes fast, but it means the writer and the table must agree on the layout at all times. If the table has 117 columns and the job sends 113-column rows, ClickHouse cannot find row boundaries and usually rejects the whole batch with <code>Code: 33 CANNOT_READ_ALL_DATA</code> (or <code>Code: 32</code> for a single short row).</p>
+<p>This makes writes fast, but it means the writer and the table must agree on the layout at all times. If the table has 12 columns and the job sends 10-column rows, ClickHouse cannot find row boundaries and usually rejects the whole batch with <code>Code: 33 CANNOT_READ_ALL_DATA</code> (or <code>Code: 32</code> for a single short row).</p>
 <p><em>Usually.</em> In a lab on ClickHouse 26.4.2.10 I sent old-shape rows into a widened table, and when the byte count happened to divide into whole new-shape rows — easy with fixed-width columns — the batch was <strong>accepted and stored as garbage</strong>. A type change is a layout change too: after <code>MODIFY COLUMN a Nullable(String)</code>, an old writer's 1,000 rows were accepted without a single error, with wrong ids and half the values NULL, because <code>Nullable</code> adds a null-flag byte per value. An error is the good outcome here.</p>
 <p>Consequences:</p>
 <ul>
@@ -74,7 +74,7 @@
 <li>You cannot start the new writer before the table is widened — its first batch fails (or lands as garbage, same rule).</li>
 <li>Schema evolution is therefore a <strong>planned stop</strong>, not a rolling change.</li>
 </ul>
-<p>The cheap way out, if you can take it: name the columns. <code>INSERT INTO t (c1, …, cN) FORMAT RowBinary</code> removes the count coupling (<code>RowBinaryWithNamesAndTypes</code> should do the same by name; I only tested the column list) — in the lab an old 4-column writer inserted cleanly into a widened 6-column table, and the new columns took their defaults. We chose bare positional for speed and bytes; the rest of this post is the price of that choice.</p>
+<p>The cheap way out, if you can take it: name the columns. <code>INSERT INTO t (c1, …, cN) FORMAT RowBinary</code> removes the count coupling (<code>RowBinaryWithNamesAndTypes</code> should do the same by name; I only tested the column list) — in the lab an old 4-column writer inserted cleanly into a widened 6-column table, and the new columns took their defaults. Our sink still sends bare positional rows; until it names its columns, the rest of this post is the price we pay.</p>
 <h2>Three surfaces, not one problem</h2>
 <p>What gets called "schema evolution" is actually three independent layers. A fix for one does nothing for the others.</p>
 <div class="table"><table>
