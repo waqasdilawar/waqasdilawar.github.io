@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClickHouse Doesn&#x27;t Rebalance: Sharding Keys, Skew, and the Cost of Adding a Shard · Muhammad Waqas Dilawar</title>
+  <meta name="description" content="Keep each tenant on one shard and joins stay local but skew; spread rows out and joins move data. Then add a shard and find out ClickHouse moves nothing for you. Tested on a live lab.">
+  <link rel="canonical" href="https://waqasdilawar.github.io/posts/clickhouse-doesnt-rebalance/">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://waqasdilawar.github.io/posts/clickhouse-doesnt-rebalance/">
+  <meta property="og:title" content="ClickHouse Doesn&#x27;t Rebalance: Sharding Keys, Skew, and the Cost of Adding a Shard · Muhammad Waqas Dilawar">
+  <meta property="og:description" content="Keep each tenant on one shard and joins stay local but skew; spread rows out and joins move data. Then add a shard and find out ClickHouse moves nothing for you. Tested on a live lab.">
+  <meta property="og:image" content="https://waqasdilawar.github.io/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root { --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --accent: #0b57d0; --line: #e4e4e4; --code: #f0f0f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111; --fg: #eee; --muted: #999; --accent: #8ab4f8; --line: #2a2a2a; --code: #1c1c1c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 8vh 16px 48px; }
+    a { color: var(--accent); text-decoration: none; text-underline-offset: 4px; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+    .back { font-size: .9rem; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: .75rem 0 .5rem; }
+    .date { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+    article h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+    article h3 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+    article p, article ul, article ol { margin: 0 0 1.1rem; }
+    code { font: .88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+    pre { background: var(--code); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+    pre code { background: none; padding: 0; font-size: .82rem; overflow-wrap: normal; }
+    .table { overflow-x: auto; margin: 0 0 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+    th { font-weight: 600; }
+    .video { margin: 0 0 2rem; }
+    .video video { width: 100%; height: auto; border-radius: 8px; background: #000; display: block; }
+    .video figcaption { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+    .diagram { margin: 1.5rem 0; overflow-x: auto; text-align: center; }
+    .diagram svg { max-width: 100%; height: auto; }
+    @media (max-width: 560px) { .diagram svg { max-width: none !important; width: 640px; } }
+    .diagram .dark { display: none; }
+    @media (prefers-color-scheme: dark) { .diagram .light { display: none; } .diagram .dark { display: block; } }
+    .posts { list-style: none; padding: 0; margin: 0; }
+    .posts li { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .posts .t { font-weight: 600; font-size: 1.05rem; }
+    .posts .d, .lede { color: var(--muted); }
+    .posts .d { font-size: .85rem; }
+    .posts p { margin: .25rem 0 0; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+      .chart { margin: 1.5rem 0; overflow-x: auto; }
+    @media (max-width: 560px) { .chart svg { width: 600px; max-width: none; } }
+    .chart svg { width: 100%; height: auto; display: block; }
+    .chart .lbl { fill: var(--fg); font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .chart .val { fill: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .chart .mod { fill: #c2410c; }
+    .chart .jump { fill: var(--accent); }
+    .chart .axis { stroke: var(--line); }
+    .chart figcaption { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+    blockquote { margin: 0 0 1.1rem; padding: .1rem 0 .1rem 1rem; border-left: 3px solid var(--line); color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="../">← All posts</a>
+    <h1>ClickHouse Doesn&#x27;t Rebalance: Sharding Keys, Skew, and the Cost of Adding a Shard</h1>
+    <p class="date"><time datetime="2026-11-03">3 November 2026</time></p>
+    <figure class="video"><video controls preload="metadata" playsinline poster="poster.png"><source src="video.mp4" type="video/mp4"></video><figcaption>Video walkthrough (8:27), recorded live against the lab.</figcaption></figure>
+    <article>
+<p>First, how a row gets placed. A ClickHouse <code>Distributed</code> table stores no data. It sits in front of one local table per shard, sends each inserted row to one shard, and sends each query to all of them. Which shard a row lands on is decided by the sharding key: ClickHouse takes the remainder of the key divided by the total shard weight. With two equal shards and <code>cityHash64(tenant_id)</code>, that is <code>cityHash64(tenant_id) % 2</code>.</p>
+<p>That expression also decides whether your joins stay local, whether one shard gets hammered, and how much work it is to add a shard later. In my production cluster we picked tenant as the key and accepted skew, because the tables we join share that key. This post is what I tested to check that choice, and what I found when I asked the next question: what happens when we add a shard?</p>
+
+<h2>The lab</h2>
+<p>ClickHouse 26.4.2.10, two shards with two replicas each, three Keeper nodes, all in Docker on a laptop. One <code>events</code> table sharded by <code>cityHash64(tenant_id)</code>, 1,000 rows across 20 tenants. Every number below is real output from that lab. In the commands, <code>ch NODE "SQL"</code> is shorthand for <code>docker exec -i NODE clickhouse-client --query "SQL"</code>.</p>
+<pre><code class="language-sql">INSERT INTO demo.events
+SELECT now(), number % 20, 'click', '{}' FROM numbers(1000)
+SETTINGS distributed_foreground_insert = 1;
+
+-- rows on one replica of each shard
+SELECT hostName() AS node, count() AS rows
+FROM clusterAllReplicas('local_cluster', demo.events_local)
+WHERE hostName() LIKE '%replica1'
+GROUP BY node ORDER BY node;
+-- ch-shard1-replica1  600
+-- ch-shard2-replica1  400</code></pre>
+<p>One thing that cost me time here: inserts into a <code>Distributed</code> table are sent in the background by default, so a count right after the insert can come back short; <code>distributed_foreground_insert = 1</code> makes tests deterministic.</p>
+
+<h2>Keep each tenant together: local joins, and skew</h2>
+<p>With a tenant key, all of a tenant's rows live on one shard. That buys two things.</p>
+<p>First, a query that filters on the tenant only needs one shard. Turn on <code>optimize_skip_unused_shards</code> and ClickHouse asks only that shard. You can see it in the query log. One catch: the server that starts the query reads its own shard locally, and that read never shows up as a remote query. Set <code>prefer_localhost_replica = 0</code> to force every shard read over the network, and the difference is clear:</p>
+<pre><code class="language-text">-- started on shard 02, tenant 0 lives on shard 01
+default                       shard 01 asked, shard 02 asked
+optimize_skip_unused_shards   shard 01 asked</code></pre>
+<p>Second, joins. I made a <code>tenants</code> table (20 rows, a plan per tenant) with the same sharding key, so each tenant's plan sits on the same shard as its events. With <code>distributed_product_mode = 'local'</code>, each shard joins only its own rows and nothing big crosses the network:</p>
+<pre><code class="language-sql">SELECT t.plan, count() AS events
+FROM demo.events AS e
+JOIN demo.tenants AS t ON e.tenant_id = t.tenant_id
+GROUP BY t.plan
+SETTINGS distributed_product_mode = 'local';
+-- pro   500
+-- free  500     (correct)</code></pre>
+<p>The price is skew. One big tenant sends 3,000 more events, and they all land on its shard:</p>
+<pre><code class="language-text">shard 01    600
+shard 02   3400</code></pre>
+<p>Every read and write for that tenant now hits one machine while the other idles.</p>
+
+<h2>Spread rows out: balance, and wrong joins</h2>
+<p>The obvious fix for skew is <code>rand()</code> as the key. Every shard gets about the same rows. So I built <code>tenants_rand</code>: the same 20 rows, placed at random across the two shards, and ran the same local join. With the big tenant's 3,000 rows included, the right answer is 3,500 / 500:</p>
+<pre><code class="language-text">pro   3300
+free   150     (truth: 3,500 / 500, and no error)</code></pre>
+<p>A tenant's plan only matches events that happen to sit on the same shard. Here 6 of 10 pro tenants (the big one among them) and 3 of 10 free tenants got lucky. The rest silently dropped out of the answer.</p>
+<p>To be fair to ClickHouse, you have to ask for this. The default <code>distributed_product_mode</code> is <code>deny</code>, which refuses the query:</p>
+<pre><code class="language-text">Code: 288. DB::Exception: Double-distributed IN/JOIN subqueries is denied
+(distributed_product_mode = 'deny')</code></pre>
+<p>I turned that protection off to show what it protects you from. The correct way for non-co-located tables is <code>distributed_product_mode = 'global'</code> (or <code>GLOBAL JOIN</code>): ClickHouse first copies the whole right-hand table to every shard, a broadcast join. It returned 3,500 / 500. That's fine for a 20-row table and expensive for a big one. The docs' <a href="https://clickhouse.com/docs/faq/general/distributed-join">distributed join FAQ</a> says that as of 2025 ClickHouse doesn't do shuffle joins. There is an experimental distributed planner (<code>make_distributed_plan</code>) that can, but it is off by default, so today, for tables that aren't co-located, broadcast is what you get.</p>
+<p>Group-bys change too. With a tenant key, each tenant's groups live on one shard, so each shard sends back only its own tenants. With <code>rand()</code>, every shard sends a partial result for every tenant, and one server merges them all. When you group by the sharding key itself, ClickHouse uses this (<code>optimize_distributed_group_by_sharding_key</code>, on by default) and skips the merge on that server.</p>
+<p>So the key choice is a trade-off:</p>
+<div class="table"><table>
+<thead><tr><th>Key</th><th>You get</th><th>You pay</th></tr></thead>
+<tbody>
+<tr><td><code>cityHash64(tenant_id)</code></td><td>Local joins on tables with the same key, one-shard filters, small group-by results</td><td>Skew when tenants differ in size</td></tr>
+<tr><td><code>rand()</code></td><td>Even shards</td><td>Joins need a broadcast; big group-bys merge everything on one server</td></tr>
+</tbody></table></div>
+<p>We chose the first. Some shards are heavier and we live with it, because correct local joins matter more to us than perfect balance. If you do the same, give every table you join the same key.</p>
+
+<h2>Then you add a shard</h2>
+<p>The <a href="https://clickhouse.com/docs/guides/oss/deployment-and-scaling/scaling-clusters">ClickHouse docs</a> say it plainly: "ClickHouse doesn't support automatic shard rebalancing." Add a third shard and nothing moves. Old rows stay where they are, and new rows follow the key.</p>
+<p>With a tenant key, that is already a split. The key now sends some tenants to the new shard, so their old rows sit on one shard and their new rows land on another. How many? With modulo, most of them:</p>
+<pre><code class="language-sql">SELECT round(100 * countIf(cityHash64(number) % 2
+                         != cityHash64(number) % 3) / count(), 1)
+FROM numbers(1000000);
+-- 66.6   (2 → 3 shards)
+-- 80.1   (4 → 5 shards, same query with % 4 and % 5)
+-- 83.3   (5 → 6 shards)</code></pre>
+<p>Going from N−1 to N shards moves 1 − 1/N of the keys, so the bigger the cluster, the worse each step. Moving the data yourself means moving most of it.</p>
+<p>The docs offer an easier way. The <a href="https://clickhouse.com/docs/engines/table-engines/special/distributed">Distributed engine page</a> says you don't have to move old data: "you can write new data to it by using a heavier weight". That's true for random placement, where nobody cares which shard holds a row. With a tenant key it doesn't fix the split. With weights 1, 1, 2 the total weight is 4: remainders 0 and 1 keep their old shard, 2 and 3 go to the new one. That sends half of all new writes to the new shard, so it isn't balanced either, and 477 of 1,000 tenant IDs now map to a different shard than their old rows.</p>
+
+<h2>The wrong answer with no error</h2>
+<p>Split tenants also give wrong answers. I made a second <code>Distributed</code> table over the same local tables with a changed key, <code>cityHash64(tenant_id) + 1</code>, which flips every tenant to the other shard. Nothing was moved. Then I asked for tenant 2, the big one from the skew test:</p>
+<pre><code class="language-sql">CREATE TABLE demo.events_newkey AS demo.events_local
+ENGINE = Distributed('local_cluster', 'demo', 'events_local',
+                     cityHash64(tenant_id) + 1);
+
+SELECT count() FROM demo.events_newkey WHERE tenant_id = 2
+SETTINGS optimize_skip_unused_shards = 1;
+-- 0
+
+SELECT count() FROM demo.events_newkey WHERE tenant_id = 2;
+-- 3050   (50 original rows + the 3,000 hot-tenant rows)</code></pre>
+<p>Zero rows, and no error. Skip unused shards trusts the key, asks only the shard where tenant 2 should be, and its rows are somewhere else. The settings docs warn about exactly this:</p>
+<blockquote>Assumes that the data is distributed by sharding key, otherwise a query yields incorrect result.</blockquote>
+<p>Local joins break the same way. Any half-finished resharding puts you here, so turn those optimizations off, or route queries to the old table, until the move is done and verified.</p>
+
+<h2>A better key: jumpConsistentHash</h2>
+<p>ClickHouse has <code>jumpConsistentHash(key, buckets)</code>, the <a href="https://arxiv.org/abs/1406.2294">jump consistent hash</a> from Google. Use it in the sharding key, with the shard count as the second argument, and adding a shard moves about 1/N of the keys, all of them to the new shard:</p>
+<figure class="chart">
+<svg viewBox="0 0 640 196" role="img" aria-labelledby="ct cd">
+<title id="ct">Share of keys that change shard when adding one shard</title>
+<desc id="cd">Modulo moves 66.6, 80.1 and 83.3 percent of keys for 2 to 3, 4 to 5 and 5 to 6 shards. Jump consistent hash moves 33.2, 20.0 and 16.6 percent.</desc>
+<line class="axis" x1="130" y1="8" x2="130" y2="160"/>
+<text class="lbl" x="0" y="34">2 → 3 shards</text>
+<rect class="mod" x="130" y="16" width="293" height="14" rx="2"/><text class="val" x="429" y="27">66.6%</text>
+<rect class="jump" x="130" y="34" width="146" height="14" rx="2"/><text class="val" x="282" y="45">33.2%</text>
+<text class="lbl" x="0" y="86">4 → 5 shards</text>
+<rect class="mod" x="130" y="68" width="352" height="14" rx="2"/><text class="val" x="488" y="79">80.1%</text>
+<rect class="jump" x="130" y="86" width="88" height="14" rx="2"/><text class="val" x="224" y="97">20.0%</text>
+<text class="lbl" x="0" y="138">5 → 6 shards</text>
+<rect class="mod" x="130" y="120" width="367" height="14" rx="2"/><text class="val" x="503" y="131">83.3%</text>
+<rect class="jump" x="130" y="138" width="73" height="14" rx="2"/><text class="val" x="209" y="149">16.6%</text>
+<rect class="mod" x="130" y="176" width="12" height="12" rx="2"/><text class="lbl" x="148" y="186">cityHash64(key) % N</text>
+<rect class="jump" x="320" y="176" width="12" height="12" rx="2"/><text class="lbl" x="338" y="186">jumpConsistentHash(cityHash64(key), N)</text>
+</svg>
+<figcaption>Share of 1,000,000 keys that change shard when one shard is added. Bars drawn to scale.</figcaption>
+</figure>
+<pre><code class="language-sql">-- keys that moved between two OLD shards when going from 2 to 3
+SELECT countIf(jumpConsistentHash(cityHash64(number), 2)
+                 != jumpConsistentHash(cityHash64(number), 3)
+               AND jumpConsistentHash(cityHash64(number), 3) != 2)
+FROM numbers(1000000);
+-- 0</code></pre>
+<p>I also used it as a real sharding key, <code>jumpConsistentHash(cityHash64(tenant_id), 2)</code>, and all 20 tenants landed on the shard it predicted. Three caveats:</p>
+<ul>
+<li>The shard count is part of the key. Adding a shard still means changing the key and moving the affected rows yourself. There are just far fewer of them.</li>
+<li>The <code>Distributed</code> engine still takes the result modulo the total weight, so keep every shard at weight 1 and the bucket count equal to the shard count.</li>
+<li>Jump hash adds and removes buckets at the end only. You can't take out a shard in the middle.</li>
+</ul>
+<p>If you shard by a key, decide this on day one. Changing the key later is the same migration you were trying to avoid.</p>
+
+<h2>Moving the data, and a recipe that loses it</h2>
+<p>You will move rows yourself, and inserts keep arriving while you copy, so it is easy to copy some rows twice and miss others. A recipe you will find in rebalancing guides: re-insert a partition from the overloaded shard through the <code>Distributed</code> table, then drop that partition on the source shard. I tried it:</p>
+<pre><code class="language-sql">-- trap table: same key, partitioned by day, 1,000 rows (600 on shard 01)
+INSERT INTO demo.trap
+SELECT * FROM remote('ch-shard1-replica1', demo.trap_local, 'default', '&lt;password&gt;')
+WHERE d = '2026-01-01'
+SETTINGS distributed_foreground_insert = 1;
+
+-- on ch-shard1-replica1
+ALTER TABLE demo.trap_local DROP PARTITION '2026-01-01';
+
+SELECT count() FROM demo.trap;
+-- before: 1000   after: 400</code></pre>
+<p>The rows went back into the same table. Every row whose key still points at shard 01 landed in the same partition on shard 01, and the drop deleted them along with the originals. Here the key hadn't changed, so all 600 were lost. After a real key change, about a third would come back and be lost. Nothing warns you.</p>
+<p>What works:</p>
+<ol>
+<li>Create new local tables and a new <code>Distributed</code> table with the new key or shard count.</li>
+<li>Copy old partitions that no longer change, one at a time, through the new <code>Distributed</code> table. (Moving whole partitions with DETACH/ATTACH is faster, but only works when the key hasn't changed, since a partition's rows now belong to several shards.)</li>
+<li>Compare counts per partition between old and new. Only then drop the old partition.</li>
+<li>Cut readers over when the counts match, and handle the still-changing recent partitions last.</li>
+</ol>
+<p>Bigger teams don't move data in place at all. <a href="https://engineering.contentsquare.com/2022/scaling-out-clickhouse-cluster/">Contentsquare</a> wrote in 2022 that they built resharding around their daily S3 backups: bring up a cluster with the new shard count, restore the backup into it, and re-split the data there with <code>clickhouse-copier</code>, so production is never the source of the copy. (<code>clickhouse-copier</code> is no longer part of ClickHouse, so today that step would be an <code>INSERT … SELECT</code> or a backup tool.) The scaling guide calls <code>INSERT … SELECT</code> into a new cluster the last resort: slow on very large data, and heavy on I/O for the source cluster.</p>
+
+<h2>Replicas: safety first, then readers</h2>
+<p>Sharding spreads the data over more machines. Replication keeps a copy of the same data on more than one. You turn it on per table with <code>ReplicatedMergeTree</code>: when one replica writes a part, it records that in Keeper, and the other replica fetches the part from it. Keeper holds the log, never the rows.</p>
+<p>I stopped one replica of shard 01 and inserted 1,000 rows through the Distributed table. The write was accepted.</p>
+<p>By default an insert waits for one replica. If that server's disk dies before the copy is made, those rows are gone. <code>insert_quorum</code> makes the insert wait for more copies, and its failure mode is worth knowing. With the replica still stopped, I inserted 10 more rows straight into the shard's local table:</p>
+<pre><code class="language-text">INSERT ... SETTINGS insert_quorum = 2, insert_quorum_timeout = 5000
+Code: 319. Unknown quorum status. The data was inserted in the local replica
+but we could not verify quorum. Reason: Timeout while waiting for quorum.</code></pre>
+<p>You only get this one if the stopped replica still looks alive to Keeper, as it did here seconds after <code>docker stop</code>. Once Keeper has noticed, the insert fails up front because too few replicas are live, and nothing is written. Here the client saw an error, but the rows were written. Then I started the replica again. By the time it answered its first query it had caught up, including the 10 quorum rows:</p>
+<pre><code class="language-text">ch-shard1-replica1   1210
+ch-shard1-replica2   1210
+ch-shard2-replica1   3800
+ch-shard2-replica2   3800</code></pre>
+<p>A client that blindly retries a quorum error can write the rows twice. Retry the exact same block so insert deduplication can drop it (it only remembers recent blocks, see <code>replicated_deduplication_window</code>), or set <code>insert_deduplication_token</code>, or check before retrying.</p>
+<p>The second job of a replica is reads: a query goes to one replica of each shard, so more replicas means more queries in parallel. That's the pattern I like for BI dashboards and AI agents that fire lots of queries. Don't add shards for them. Add a replica to each shard and point them at those replicas only, with a second cluster definition:</p>
+<pre><code class="language-text">&lt;remote_servers&gt;
+  &lt;agents_cluster&gt;
+    &lt;shard&gt;&lt;replica&gt;&lt;host&gt;ch-shard1-replica2&lt;/host&gt;...&lt;/replica&gt;&lt;/shard&gt;
+    &lt;shard&gt;&lt;replica&gt;&lt;host&gt;ch-shard2-replica2&lt;/host&gt;...&lt;/replica&gt;&lt;/shard&gt;
+  &lt;/agents_cluster&gt;
+&lt;/remote_servers&gt;</code></pre>
+<p>A <code>Distributed</code> table on <code>agents_cluster</code> returned the full count, and the query log showed only <code>ch-shard1-replica2</code> and <code>ch-shard2-replica2</code> did the reading. <code>SYSTEM RELOAD CONFIG</code> picked it up without a restart. Two catches: those replicas still take every write, because they are full copies, and they can be a second or two behind.</p>
+
+<h2>The four results that matter</h2>
+<div class="table"><table>
+<thead><tr><th>Test</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Local join on tables that aren't co-located</td><td>3,300 / 150 instead of 3,500 / 500, no error</td></tr>
+<tr><td>Changed key, data not moved, skip unused shards</td><td>0 rows instead of 3,050, no error</td></tr>
+<tr><td>Keys moved going 2 → 3 shards</td><td>66.6% with modulo, 33.2% with jump hash</td></tr>
+<tr><td>Re-insert, then DROP PARTITION</td><td>1,000 rows → 400</td></tr>
+</tbody></table></div>
+
+<h2>Debugging queries I keep</h2>
+<pre><code class="language-sql">-- where do a tenant's rows live?
+SELECT hostName(), count()
+FROM clusterAllReplicas('local_cluster', demo.events_local)
+WHERE tenant_id = 2 GROUP BY hostName();
+
+-- is a shard heavier?
+SELECT hostName(), sum(rows), formatReadableSize(sum(bytes_on_disk))
+FROM clusterAllReplicas('local_cluster', system.parts)
+WHERE active AND table = 'events_local' GROUP BY hostName();
+
+-- background inserts stuck?
+SELECT database, table, data_files, error_count, last_exception
+FROM clusterAllReplicas('local_cluster', system.distribution_queue);
+
+-- replication healthy?
+SELECT hostName(), table, is_readonly, queue_size, absolute_delay
+FROM clusterAllReplicas('local_cluster', system.replicas);
+
+-- which servers ran my query? (SYSTEM FLUSH LOGS on every node first)
+SELECT hostName(), is_initial_query, read_rows
+FROM clusterAllReplicas('local_cluster', system.query_log)
+WHERE log_comment = 'my-tag' AND type = 'QueryFinish';</code></pre>
+
+<h2>Before you shard</h2>
+<p>One ClickHouse server handles a lot. Make it fast first: a good sort key, the right types, big insert batches. Then a bigger machine. The docs give two reasons to shard: the data is too large for one server, or one server is too slow. Add replicas for safety and for readers. Add shards when one machine really isn't enough, and when you do, choose the key you join and filter on most, and think about how you will add the next shard before you add the first.</p>
+    </article>
+    <footer>© 2026 <a href="../../">Muhammad Waqas Dilawar</a></footer>
+  </div>
+</body>
+</html>
