@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to know a backfill is safe to swap before you swap it · Muhammad Waqas Dilawar</title>
+  <meta name="description" content="Why &#x27;it ran&#x27; is not &#x27;safe to swap&#x27;: two reconciliations, a pad sized to the latency tail, a gate that caught a regression on sample one.">
+  <link rel="canonical" href="https://waqasdilawar.github.io/posts/backfill-safe-to-swap/">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://waqasdilawar.github.io/posts/backfill-safe-to-swap/">
+  <meta property="og:title" content="How to know a backfill is safe to swap before you swap it · Muhammad Waqas Dilawar">
+  <meta property="og:description" content="Why &#x27;it ran&#x27; is not &#x27;safe to swap&#x27;: two reconciliations, a pad sized to the latency tail, a gate that caught a regression on sample one.">
+  <meta property="og:image" content="https://waqasdilawar.github.io/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+    :root { --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --accent: #0b57d0; --line: #e4e4e4; --code: #f0f0f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #111; --fg: #eee; --muted: #999; --accent: #8ab4f8; --line: #2a2a2a; --code: #1c1c1c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.7 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 8vh 16px 48px; }
+    a { color: var(--accent); text-decoration: none; text-underline-offset: 4px; }
+    a:hover, a:focus-visible { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+    .back { font-size: .9rem; }
+    h1 { font-size: 2.1rem; line-height: 1.2; margin: .75rem 0 .5rem; }
+    .date { color: var(--muted); font-size: .9rem; margin: 0 0 2rem; }
+    article h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+    article h3 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+    article p, article ul, article ol { margin: 0 0 1.1rem; }
+    code { font: .88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: .1rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
+    pre { background: var(--code); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+    pre code { background: none; padding: 0; font-size: .82rem; overflow-wrap: normal; }
+    .table { overflow-x: auto; margin: 0 0 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { text-align: left; vertical-align: top; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+    th { font-weight: 600; }
+    .video { margin: 0 0 2rem; }
+    .video video { width: 100%; height: auto; border-radius: 8px; background: #000; display: block; }
+    .video figcaption { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+    .diagram { margin: 1.5rem 0; overflow-x: auto; text-align: center; }
+    .diagram svg { max-width: 100%; height: auto; }
+    @media (max-width: 560px) { .diagram.wide svg { max-width: none !important; width: 640px; } }
+    .diagram .dark { display: none; }
+    @media (prefers-color-scheme: dark) { .diagram .light { display: none; } .diagram .dark { display: block; } }
+    .posts { list-style: none; padding: 0; margin: 0; }
+    .posts li { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .posts .t { font-weight: 600; font-size: 1.05rem; }
+    .posts .d, .lede { color: var(--muted); }
+    .posts .d { font-size: .85rem; }
+    .posts p { margin: .25rem 0 0; }
+    footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="../">← All posts</a>
+    <h1>How to know a backfill is safe to swap before you swap it</h1>
+    <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
+    <article>
+<p><em>"It ran" and "it produced rows" tell you nothing about whether replacing production with it is safe. That is a separate proof — and the gate that proves it caught a silent regression on the very first sample.</em></p>
+<p>Quick context. A backfill reprocesses a past window of an event stream into a separate table, and swapping replaces production's partitions for that window with the reprocessed ones. Production here is a ClickHouse <code>ReplacingMergeTree</code>, which keeps, per key, the row with the highest version — once the parts have merged.</p>
+<p>In <a href="../lakehouse-distance/">the last post</a> I got a backfill to finally read real bronze and land its rows in a local ClickHouse. That felt like the finish line. It was not even close.</p>
+<p>Because the moment you have a reprocess that produces output, you face a much harder question than "did it run." You face: <em>is this output safe to put into production?</em> A backfill exists to replace or repair what production already has — and a backfill can do that job <em>worse</em> than the live pipeline did, silently, while reporting a clean success. Rows landed, exit code zero, and you have quietly made your data worse. So before any swap, I built a reconciliation gate whose only job is to answer the real question. Here is what building it taught me.</p>
+<h2>1. There are two reconciliations, not one, and they answer different questions</h2>
+<p>I kept conflating them until I forced them apart, and keeping them separate is half the value.</p>
+<p>The first is <strong>source against destination</strong>: is the source record faithfully transformed into the destination row? You read the source, recompute the expected row with the <em>exact</em> production mappers, and diff field by field. This proves the transform is correct.</p>
+<p>The second is <strong>backfill against live</strong>: does my reprocess output match-or-improve what the production stream has already written, keyed by the business id? This compares two destinations — my reprocess and live production — and it is a <em>no-regression gate</em> before any swap. Its motto is the whole point: do a better job, and do not mess up.</p>
+<p>These are not the same check, and a passing one does not imply the other. A perfectly correct transform can still regress production, for a reason that took me a real example to see.</p>
+<h2>2. The gate earned its place on the first sample</h2>
+<p>The first real cross-verify I ran — a handful of random ids, my backfill against live production — flagged two of five as regressions immediately. Not transform bugs. Regressions: my output was <em>worse</em> than what production already had.</p>
+<p>The cause is worth keeping. My backfill read a one-hour window. It caught the open event — status PENDING — but it clipped the completion event, because the completion's event time falls <em>after</em> the window. The live pipeline sees the whole continuous stream, so it had already moved that record to COMPLETED. If I had swapped my output in, I would have overwritten a COMPLETED record with PENDING. A successful-looking backfill, quietly walking production backwards.</p>
+<p>This is the general trap, and it is not specific to my stream: any window-bounded reprocess of an event stream clips the <em>late</em> events that complete a record. The thing that opens a record lands inside your window; the thing that completes it lands outside. Your reprocess looks complete and is not. The no-regression gate exists precisely to catch this, and it caught it on sample number one — which is the best argument I can give for building the gate before you think you need it.</p>
+<h2>3. Pad the late events, anchored on the one that defines the window — and size the pad to the tail</h2>
+<p>The fix is a read-window pad. For the late-arriving completion events, read past the end of the window, so a record opened near the boundary still picks up the event that completes it. Crucially you do <em>not</em> pad the event that anchors the window; that one defines what you are reprocessing, and padding it would pull in records you did not mean to touch.</p>
+<p>Here is the gotcha I want to flag loudly, because it is easy to get wrong: the pad has to cover the <em>tail</em> of your open-to-complete latency, not the median. Completion events can trail the open event by hours, and sometimes by more than a day — slow downstreams. If you set the pad to six hours and your real ninety-ninth percentile is eighteen, you are still clipping late completions, and your gate will keep flagging them — correctly — as artifacts of too small a pad. So pull the actual open-to-complete latency distribution from a known-good day and set the pad above the tail you care about. A day-level pad is safer, but a two-day-late completion still clips at the day edge. There is no pad that escapes a long-enough tail; there is only a pad that covers the tail you have decided to honour.</p>
+<h2>4. A good reconciliation tells you the truth about your source, not just your transform</h2>
+<p>This is the lesson I did not expect and value the most.</p>
+<p>When the full reconciliation ran, it reported zero open events for the target day. Zero. My first instinct was that something in my pipeline was dropping them. It was not. The source connector that captures those events had been deployed the <em>day after</em> the day I was reprocessing — so the source itself, the bronze, held only completion events for that day and no open events at all. Most of the rows my backfill produced were completion-only placeholders with no matching open event that was ever captured anywhere. Nothing was broken. The source was simply incomplete, and incomplete in a way that no amount of staring at my own code would have revealed.</p>
+<p>That is the quiet power of a reconciliation that is built honestly: it separates "my transform is wrong" from "my source never had it." The hardest data bugs are upstream-completeness bugs wearing the costume of a pipeline bug, and they will burn a huge amount of your time debugging code that is working perfectly. A reconciliation that points at the source instead of at you is worth far more than the fidelity number it prints.</p>
+<h2>5. Reconcile against the winning row — and do not let coverage pose as fidelity</h2>
+<p>Two things here, both about not fooling yourself.</p>
+<p>First, when your destination is a last-writer-wins store — a ReplacingMergeTree, or anything that dedupes on a version — you must reconcile against the <em>winning</em> version of each row, not whichever copy you happen to read before a merge. In ClickHouse that means <code>argMax(field, version)</code>, which gives the same answer as <code>FINAL</code> when versions are unique and you group by the sorting key. I checked that on ClickHouse 26.4.2.10 with merges stopped: 100,000 ids across three unmerged parts, zero ids where <code>argMax</code> and <code>FINAL</code> disagreed, while a naive read of the unmerged rows showed three times as many PENDING as there were. Read a pre-merge row and you will manufacture diffs that do not exist and chase ghosts.</p>
+<p>Second, be very honest about what your number proves. My headline was that the completion events present in the source reconcile to the destination at about 99.5 percent, every one of them driving a terminal status. That is a real and useful result — but it is <em>coverage plus status</em>, not field-value fidelity. It says the ids exist in the destination and that a landed completion did not leave a record stuck PENDING. It does <em>not</em> say the other fields or the timestamps are right; that is a separate, field-level comparison against the production mapper. Keep the two numbers distinct in the report and never let a coverage percentage quietly stand in for transform correctness. And spend your attention on the residual, not the headline: a gate earns trust by explaining the half-percent that did <em>not</em> reconcile, not by waving the number that did.</p>
+<h2>One more</h2>
+<p><strong>Read the source the same way the pipeline does.</strong> The reconciler has to reuse the <em>exact</em> production parsers and mappers — in my case the same envelope parser and the same column mapper the live job uses. The mapper <em>is</em> the per-column provenance. The moment you re-implement the transform inside the checker, you are no longer validating the pipeline; you are diffing your two implementations against each other, and every place they differ becomes a false positive that looks exactly like a real bug.</p>
+<h2>Where it landed</h2>
+<p>In the end the reconciliation is satisfyingly small: one SQL JOIN. The source is read directly — the Iceberg table function pointed at the bronze path with static keys, which auto-discovers the metadata and reads the parquet without going through the catalog's credential delegation at all — and joined against the final-deduped destination, keyed by the correlation id. Source coverage on one side, terminal status on the other, and the residual called out:</p>
+<pre><code class="language-sql">WITH src AS (                 -- source: read bronze directly, no catalog delegation
+  SELECT correlation_id,
+         /* parse the completion event out of the envelope */ AS status
+  FROM iceberg('s3://.../bronze/&lt;source&gt;', '&lt;key&gt;', '&lt;secret&gt;')
+  WHERE event_time &gt;= :from AND event_time &lt; :to
+),
+dest AS (                     -- destination: the winning row per id
+  SELECT correlation_id AS cid,
+         argMax(status, updated_at) AS dstat      -- same as FINAL when versions are unique
+  FROM reprocess
+  GROUP BY correlation_id
+)
+SELECT
+  uniqExact(s.correlation_id)                              AS source_ids,
+  uniqExactIf(s.correlation_id, d.cid != '')               AS reconciled,   -- unmatched = ''
+  uniqExactIf(s.correlation_id,
+              d.dstat IN ('COMPLETED', 'FAILED'))          AS terminal
+FROM src s LEFT JOIN dest d ON s.correlation_id = d.cid;
+</code></pre>
+<p>It gave a clean answer in one pass: about 99.5 percent of the completion events present in bronze reconcile, all terminal, and it pinpointed the day-after connector gap in the same query. That is exactly what a pre-swap gate needs to be able to say.</p>
+<p>One honest footnote on that read path. Reading the source directly with static keys was the pragmatic unlock — it sidestepped a storm of permission failures from the catalog's credential vending — but it does trade against the discipline of having <em>one</em> read path everywhere else, and it puts long-lived keys into the reconciler's config. It is correctness-neutral; it reads the same bytes. But it is a choice to make with your eyes open, not one to back into because it was the path of least resistance. The cleaner long-term answer is the one from <a href="../polaris-cant-vend-clickhouse-oci/">When Polaris Can't Vend</a>: read through the catalog with vending off and a scoped, read-only key, and keep a single way of reading the lake.</p>
+<p>And the wall underneath all of it is the same one from last time. The reason this reconciliation had to be windowed and source-first sampled at all is that the source is a small-files swamp — a single day is thousands of tiny files, and a full-day count just times out from a laptop far from the data. Same wall, two doors.</p>
+<h2>What I am taking away</h2>
+<p>Three claims, and they are not the same claim: "it ran," "it is correct," and "it is safe to swap." A green run proves the first. A field-level diff against the production mapper proves the second. A no-regression gate against live proves the third — and that third one is the only one that protects production, so build it before you need it, not after a bad swap has taught you why. Mine caught a silent regression on its first sample, and it found a source-capture gap that I would otherwise have spent days blaming on my own code. If there is one habit I am keeping from this, it is to ask, every time the gate flags something: is this my transform, or is this my source? The answer is the difference between fixing a bug and chasing one that was never there.</p>
+    </article>
+    <footer>© 2026 <a href="../../">Muhammad Waqas Dilawar</a></footer>
+  </div>
+</body>
+</html>
