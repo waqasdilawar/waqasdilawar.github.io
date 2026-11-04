@@ -63,7 +63,7 @@
     <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
     <article>
 <p><em>A production Flink job that restarted every few hours, a stack trace that said "out of memory" and meant "you forgot to take out the trash," and a maintenance job that made things worse before it made them better.</em></p>
-<p>Quick context. A Flink streaming job commits to Iceberg tables behind a Polaris REST catalog, on OCI Object Storage. Every commit adds a snapshot to the table's metadata, and nothing removes it until you run snapshot expiry.</p>
+<p>Our Flink streaming job commits to Iceberg tables behind a Polaris REST catalog, on OCI Object Storage. Every commit adds a snapshot to the table's metadata, and nothing removes it until you run snapshot expiry.</p>
 <p>I want to write this one down because the failure looked like one thing and was another, and because I have now watched the same mechanism bite from two directions in the same week. Iceberg is a table format that gives you atomic commits, time travel, and engine independence. What it does not give you is garbage collection. You own that. Skip it long enough and the bill does not arrive as slowness. It arrives as a writer that cannot commit at all.</p>
 <h2>The restarts</h2>
 <p>Our production correlation job — Flink 2.2, RocksDB, writing to both ClickHouse and an Iceberg silver layer behind a Polaris REST catalog — had restarted <strong>sixteen times in forty-four hours</strong>. Forty-eight failed checkpoints out of about 2,600. Nobody had been paged. The job self-heals: it dies, restarts from the last checkpoint, replays, catches up. From the outside it looked like a slightly bumpy pipeline. Reporting freshness took a hit every few hours and then recovered. Nothing was lost.</p>

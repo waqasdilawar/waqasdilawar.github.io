@@ -62,7 +62,7 @@
     <h1>20 seconds a page: where ClickHouse was really spending the time</h1>
     <p class="date"><time datetime="2026-11-04">4 November 2026</time></p>
     <article>
-<p>Quick context. We moved a customer-facing analytics API from a legacy batch warehouse to ClickHouse. It serves dashboards, a paged list of records, and a detail view, and it reads tables that keep one row per version of a record (<code>ReplacingMergeTree</code> by <code>updated_at</code>), folded to the latest version at read time. Day partitions on event time; the sorting key is account and record id, <strong>not time</strong>.</p>
+<p>We moved a customer-facing analytics API from a legacy batch warehouse to ClickHouse. It serves dashboards, a paged list of records, and a detail view, and it reads tables that keep one row per version of a record (<code>ReplacingMergeTree</code> by <code>updated_at</code>), folded to the latest version at read time. Day partitions on event time; the sorting key is account and record id, <strong>not time</strong>.</p>
 <p>The numbers matched on day one — within 0.3% of the old warehouse on a day for the largest clients. The speed did not. One page of the list for the largest client took about 20 seconds, whatever the window, the page number or the API version; the old warehouse took 1 to 6. Under load, a page of 15 rows used 25 to 35 GB of memory.</p>
 <p>The fixes are easy to list. The method is what I would reuse: the cause was different on every screen, and two of them were not where we first looked.</p>
 <h2>The short version</h2>
