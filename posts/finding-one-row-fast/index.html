@@ -67,7 +67,7 @@
 <ul>
 <li><strong>Silver (ClickHouse):</strong> add one <code>bloom_filter</code> skip index on the id — 49–81× fewer rows read in the lab, two ALTERs, no re-sort.</li>
 <li><strong>Bronze (Iceberg):</strong> turn the Parquet bloom on as a table property and every writer that honors it, the sink included, writes it from the first commit. A lookup then reads about one row group instead of all of them: ~5× fewer rows on a fresh five-row-group file, ~50× on the compacted fifty-row-group table. A Spark sort-rewrite is the follow-up that adds file-level range pruning.</li>
-<li><strong>Compaction</strong> isn't what makes the bloom work. It is what makes the manifest loadable and the file count small enough for the rest to matter.</li>
+<li><strong>Compaction</strong> isn't what makes the bloom work. It gives you a manifest small enough to load and fewer files for a lookup to open.</li>
 </ul>
 <h2>The problem</h2>
 <p>Start with the thing that trips people coming from OLTP: there are no secondary indexes here. Analytical engines don't point-chase down a B-tree; they skip data they can prove they don't need. That pruning comes from three places — how the data is laid out (partition and sort), the min/max statistics per file and per row group, and bloom filters. So "make this lookup fast" isn't "add an index" in the OLTP sense. It's "give the engine something to prune with."</p>
